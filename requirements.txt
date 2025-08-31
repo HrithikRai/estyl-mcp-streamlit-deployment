@@ -1,0 +1,8 @@
+python-dotenv
+weaviate-client
+transformers
+torch
+pillow
+numpy
+openai
+mcp[cli]
