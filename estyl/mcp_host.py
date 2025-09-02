@@ -12,11 +12,9 @@ from openai import AsyncOpenAI
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 
-# ---------- Config ----------
 MODEL = "gpt-4o-mini"
-MAX_HISTORY_TURNS = 10          # keep last N user/assistant pairs (+ system)
+MAX_HISTORY_TURNS = 10          
 
-# ---------- OpenAI client (async, reused) ----------
 client = AsyncOpenAI()
 
 def load_style_yaml(path: str = "estyl/style_guide.yaml") -> str:
@@ -89,7 +87,7 @@ OPENAI_TOOLS = [
                     "limit": {"type": "integer", "minimum": 10, "maximum": 50},
                     "topk_for_rerank": {"type": "integer", "minimum": 10, "maximum": 40},
                     "exclude_ids": {"type": ["array","null"], "items": {"type": "string"}},
-                    "num_outfits": {"type": "integer", "minimum": 10, "maximum": 20},
+                    "num_outfits": {"type": "integer", "minimum": 10, "maximum": 20, "description": "The number of outfits to compose, always 10."},
                     "articles": {"type": "integer", "minimum": 5, "maximum": 7},
                     "per_cat_candidates": {"type": "integer", "minimum": 5, "maximum": 10}
                 },
@@ -98,9 +96,6 @@ OPENAI_TOOLS = [
         }
     }
 ]
-
-# ---------- Helpers ----------
-
 
 def content_text(msg) -> str:
     """
@@ -113,7 +108,6 @@ def content_text(msg) -> str:
     if isinstance(c, list):
         out = []
         for part in c:
-            # text parts usually look like {"type":"text","text":"..."}
             t = part.get("text") if isinstance(part, dict) else None
             if t:
                 out.append(t)
@@ -121,7 +115,6 @@ def content_text(msg) -> str:
     return ""
 
 def cap_history(history: List[Dict[str, Any]], max_turns: int = MAX_HISTORY_TURNS) -> List[Dict[str, Any]]:
-    # keep system + last N*2 turns (user+assistant)
     if not history:
         return history
     sys_msgs = [m for m in history if m.get("role") == "system"]
@@ -129,7 +122,6 @@ def cap_history(history: List[Dict[str, Any]], max_turns: int = MAX_HISTORY_TURN
     keep = others[-(max_turns * 2):]
     return sys_msgs[:1] + keep
 
-# ---------- Main run loop (CLI demo, non-streaming) ----------
 async def run_chat():
     params = StdioServerParameters(
         command=sys.executable,
@@ -159,7 +151,6 @@ async def run_chat():
                 history.append({"role": "user", "content": user})
                 history = cap_history(history)
 
-                # First call: let the model decide on tool usage
                 resp = await client.chat.completions.create(
                     model=MODEL,
                     messages=history,
@@ -168,15 +159,11 @@ async def run_chat():
                 msg = resp.choices[0].message
 
                 if msg.tool_calls:
-                    # Handle only the first tool call for speed; you can loop if you allow chains.
                     tc = msg.tool_calls[0]
                     if tc.function.name == "estyl_retrieve":
                         args = json.loads(tc.function.arguments or "{}")
-
-                        # Call MCP tool
                         result = await session.call_tool("estyl_retrieve", args)
                         tool_output = result.content[0].text if result.content else "{}"
-                        # Feed tool result back (omit tools here to force final answer)
                         history.append({
                             "role": "assistant",
                             "tool_calls": [{

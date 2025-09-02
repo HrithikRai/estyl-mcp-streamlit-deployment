@@ -240,7 +240,9 @@ def _serialize_item(obj) -> Item:
     return Item(uuid=obj.uuid, score=score, rerank_score=rr, properties=props)
 
 def _price_bounds_for(cat: str, tier: str) -> Tuple[Optional[float], Optional[float]]:
-    if cat not in BUDGET_TIERS: return None, None
+    """Return the (lo, hi) bounds for a category + tier."""
+    if cat not in BUDGET_TIERS:
+        return (None, None)
     return BUDGET_TIERS[cat][tier]
 
 def _normalize_price(x) -> float:
@@ -363,7 +365,15 @@ OPTIONAL_CATEGORIES = {
 def _build_category_filters(cat: str, gender: str, tier: str, brand: Optional[str], cap: Optional[float]) -> Optional[Filter]:
     lo, hi = _price_bounds_for(cat, tier)
     if cap is not None:
-        hi = min(hi, cap) if hi is not None else cap
+        if hi is None:
+            hi = cap  # unbounded tier → cap becomes upper bound
+        else:
+            hi = min(hi, cap)
+    if hi is not None and lo is not None and hi < lo:
+        logger.debug(f" Adjusting inverted bounds for {cat}: ({lo}, {hi}) → ({lo}, {cap})")
+        hi = cap if cap is not None else hi
+        if hi < lo:  # still bad? just drop lo
+            lo = None
     logger.debug(f"Category '{cat}' price bounds: {lo} - {hi} (cap: {cap}) | (tier : {tier})")
     return build_filters(
         gender=None if gender == "any" else gender,

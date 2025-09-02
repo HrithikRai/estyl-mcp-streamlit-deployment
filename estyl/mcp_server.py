@@ -73,14 +73,62 @@ CAT_SYNONYMS = {
     "wallet": "Small Leather Goods",
 }
 
-def normalize_categories(user_query: str) -> List[str]:
-    """Extract categories from user query using CAT_SYNONYMS."""
-    q = user_query.lower()
+# def normalize_categories(user_query: str) -> List[str]:
+#     """Extract categories from user query using CAT_SYNONYMS."""
+#     q = user_query.lower()
+#     found = set()
+#     for word, cat in CAT_SYNONYMS.items():
+#         if word in q:
+#             found.add(cat)
+#     return list(found & CATEGORIES)
+
+def normalize_categories(
+    categories: Optional[List[str]] = None,
+    user_query: Optional[str] = None
+) -> List[str]:
+    """
+    Normalize categories from explicit list or free-text query.
+    - Always respects bot-supplied categories if present.
+    - Adds query-derived categories as extra hints.
+    - Fallback is the standard outfit categories.
+    """
     found = set()
-    for word, cat in CAT_SYNONYMS.items():
-        if word in q:
-            found.add(cat)
-    return list(found & CATEGORIES)
+
+    def resolve_token(token: str) -> Optional[str]:
+        t = token.lower().strip()
+        # Synonym match
+        if t in CAT_SYNONYMS:
+            return CAT_SYNONYMS[t]
+        # Exact canonical match
+        for canon in CATEGORIES:
+            if t == canon.lower():
+                return canon
+        # Controlled substring
+        for canon in CATEGORIES:
+            if len(t) > 3 and (t in canon.lower() or canon.lower() in t):
+                return canon
+        return None
+
+    # 1. Start with categories explicitly passed by bot
+    if categories:
+        for c in categories:
+            resolved = resolve_token(c)
+            if resolved:
+                found.add(resolved)
+
+    # 2. Add any categories inferred from text query
+    if user_query:
+        for token in user_query.lower().split():
+            resolved = resolve_token(token)
+            if resolved:
+                found.add(resolved)
+
+    # 3. Fallback → use standard outfit categories
+    if not found:
+        return ["Tops", "Bottoms", "Shoes", "Outerwear", "Accessories"]
+
+    return list(found)
+
 
 @mcp.tool(title="Retrieve fashion items or compose outfits", name="estyl_retrieve")
 def estyl_retrieve(
