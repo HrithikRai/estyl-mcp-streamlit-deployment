@@ -19,8 +19,16 @@ from .config import (
     OUTFIT_WEIGHTS, OUTFIT_ORDER_BY_N, CAT_SYNONYMS,
 )
 
-import logging
-logging.basicConfig(level=logging.DEBUG)
+import logging, sys
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    filename='core.log', 
+    filemode='w'
+)
+
+logger = logging.getLogger("core")
 
 # ------------------------
 # Dataclasses / Types
@@ -30,10 +38,10 @@ class SingleSearchParams:
     text_query: str = ""
     search_with: str = "Text"          # "Text" | "Image" | "Text + Image"
     image_b64: Optional[str] = None    # base64 encoded image
-    gender: str = "any"                # "any" | "male" | "female" | "unisex"
+    gender: str = "unisex"                # "male" | "female" | "unisex"
     categories: List[str] = None
     brand_contains: Optional[str] = None
-    budget_tier: str = "Mid"
+    budget_tier: str = ""
     budget: float = 350.0
     limit: int = 12
     topk_for_rerank: int = 40
@@ -273,7 +281,7 @@ def do_hybrid_search(
         effective_alpha = 0.0
         primary_vec = text_vec
         target_vector = "text_vector"
-    logging.debug("Running hybrid search with query=%s, limit=%s, filters=%s",
+    logger.debug("Running hybrid search with query=%s, limit=%s, filters=%s",
                   text_query, limit, filters)
     q = client.collections.get(COLLECTION).query.hybrid(
         query=text_query or "",
@@ -287,7 +295,7 @@ def do_hybrid_search(
         return_properties=RETURN_PROPS,
         return_metadata=MetadataQuery(score=True),
     )
-    logging.debug("Got %d objects back", len(q.objects) if q.objects else 0)
+    logger.debug("Got %d objects back", len(q.objects) if q.objects else 0)
     return q.objects
 
 # ------------------------
@@ -348,6 +356,7 @@ def _build_category_filters(cat: str, gender: str, tier: str, brand: Optional[st
     lo, hi = _price_bounds_for(cat, tier)
     if cap is not None:
         hi = min(hi, cap) if hi is not None else cap
+    logger.debug(f"Category '{cat}' price bounds: {lo} - {hi} (cap: {cap}) | (tier : {tier})")
     return build_filters(
         gender=None if gender == "any" else gender,
         categories=[cat],
@@ -369,7 +378,10 @@ def _lm_fallback_plan(num_outfits, cats, text_query, brand_hint):
     for _ in range(num_outfits):
         plan = {}
         for c in cats:
-            q = " ".join([w for w in [base, c, (brand_hint or "").strip()] if w])
+            if "top" in c.lower():  # only apply global theme to Tops
+                q = " ".join([w for w in [base, c, (brand_hint or "").strip()] if w])
+            else:
+                q = " ".join([w for w in ["", c, (brand_hint or "").strip()] if w])
             plan[c] = q
         plans.append(plan)
     return plans
@@ -433,11 +445,11 @@ def compose_outfits(p: OutfitParams) -> Dict[str, Any]:
             score = 0.0
             for idx, (cat, o) in enumerate(zip(cats_in_this, combo)):
                 s_rank = rank_scores[idx][o.uuid]
-                cap = caps.get(cat) or (p.budget / len(cats_in_this))
+                cap = caps.get(cat) or (total_budget / len(cats_in_this))
                 s_price_penalty = 0.02 * (_item_price(o) / max(1.0, cap))
                 score += (s_rank - s_price_penalty)
 
-            if total_price <= p.budget and (score > best_score or (score == best_score and total_price < best_price)):
+            if total_price <= total_budget and (score > best_score or (score == best_score and total_price < best_price)):
                 best_score, best_combo, best_price = score, combo, total_price
 
         if best_combo is None:
@@ -447,7 +459,7 @@ def compose_outfits(p: OutfitParams) -> Dict[str, Any]:
                 uuids = {o.uuid for o in combo}
                 if len(uuids) < len(combo): continue
                 total_price = sum(_item_price(o) for o in combo)
-                gap = total_price - p.budget
+                gap = total_price - total_budget
                 score = 0.0
                 for idx, (cat, o) in enumerate(zip(cats_in_this, combo)):
                     s_rank = rank_scores[idx][o.uuid]

@@ -8,7 +8,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 import logging
-logging.basicConfig(level=logging.DEBUG)
+#logging.basicConfig(level=logging.DEBUG)
 
 # Tool schema mirrored for OpenAI tool-calling
 OPENAI_TOOLS = [
@@ -24,18 +24,18 @@ OPENAI_TOOLS = [
                     "text_query": {"type": "string"},
                     "search_with": {"type": "string", "enum": ["Text", "Image", "Text + Image"]},
                     "image_b64": {"type": ["string", "null"]},
-                    "gender": {"type": "string", "enum": ["any","male","female","unisex"]},
+                    "gender": {"type": "string", "enum": ["male","female","unisex"]},
                     "categories": {"type": "array", "items": {"type": "string"}},
                     "brand_contains": {"type": ["string","null"]},
                     "budget_tier": {"type": "string", "enum": ["Budget","Mid","Premium","Luxury"]},
-                    "budget": {"type": "number", "minimum": 0},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 48},
-                    "topk_for_rerank": {"type": "integer", "minimum": 4, "maximum": 200},
+                    "budget": {"type": "number", "minimum": 200},
+                    "limit": {"type": "integer", "minimum": 10, "maximum": 48},
+                    "topk_for_rerank": {"type": "integer", "minimum": 10, "maximum": 200},
                     "offset": {"type": "integer", "minimum": 0},
                     "exclude_ids": {"type": ["array","null"], "items": {"type": "string"}},
-                    "num_outfits": {"type": "integer", "minimum": 1, "maximum": 10},
-                    "articles": {"type": "integer", "minimum": 2, "maximum": 5},
-                    "per_cat_candidates": {"type": "integer", "minimum": 1, "maximum": 10}
+                    "num_outfits": {"type": "integer", "minimum": 5, "maximum": 10},
+                    "articles": {"type": "integer", "minimum": 5, "maximum": 5},
+                    "per_cat_candidates": {"type": "integer", "minimum": 5, "maximum": 10}
                 },
                 "required": ["mode"]
             }
@@ -48,6 +48,7 @@ SYSTEM_PROMPT = """You are Estyl, a helpful fashion assistant.
 Decide when to call the `estyl_retrieve` tool:
 - Call the tool if the user asks for product suggestions, searching, filtering, budgeted looks, or outfits.
 - Free-chat if the user only asks for generic fashion advice with no need for catalog retrieval.
+- If the user query is vague, you can ask followup questions but make sure to keep the interaction minimum.
 Return concise, helpful answers. When tool results are present, summarize clearly and include key product fields.
 """
 

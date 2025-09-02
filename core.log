@@ -1,0 +1,151 @@
+2025-09-02 13:09:27,987 [DEBUG] Initializing server 'Estyl Retriever'
+2025-09-02 13:09:27,988 [DEBUG] Registering handler for ListToolsRequest
+2025-09-02 13:09:27,988 [DEBUG] Registering handler for CallToolRequest
+2025-09-02 13:09:27,988 [DEBUG] Registering handler for ListResourcesRequest
+2025-09-02 13:09:27,988 [DEBUG] Registering handler for ReadResourceRequest
+2025-09-02 13:09:27,988 [DEBUG] Registering handler for PromptListRequest
+2025-09-02 13:09:27,988 [DEBUG] Registering handler for GetPromptRequest
+2025-09-02 13:09:27,988 [DEBUG] Registering handler for ListResourceTemplatesRequest
+2025-09-02 13:09:27,999 [DEBUG] Using proactor: IocpProactor
+2025-09-02 13:09:31,163 [DEBUG] Received message: root=InitializedNotification(method='notifications/initialized', params=None, jsonrpc='2.0')
+2025-09-02 13:09:31,163 [DEBUG] Received message: <mcp.shared.session.RequestResponder object at 0x0000023A00931D60>
+2025-09-02 13:09:31,164 [INFO] Processing request of type CallToolRequest
+2025-09-02 13:09:31,164 [DEBUG] Dispatching request of type CallToolRequest
+2025-09-02 13:09:31,164 [DEBUG] Tool cache miss for estyl_retrieve, refreshing cache
+2025-09-02 13:09:31,164 [DEBUG] >>> estyl_retrieve called with args: {'mode': 'outfit', 'text_query': 'smart casual shirt, chinos, brown oxfords, sleek watch', 'gender': 'male', 'categories': ['shirts', 'chinos', 'shoes', 'watches'], 'search_with': 'Text', 'image_b64': None, 'brand_contains': None, 'budget_tier': 'Mid', 'budget': None, 'limit': 10, 'topk_for_rerank': 10, 'offset': 0, 'exclude_ids': None, 'num_outfits': 5, 'articles': 5, 'per_cat_candidates': 5}
+2025-09-02 13:09:31,164 [DEBUG] Resolved categories: ['Jewelry & Watches', 'Tops']
+2025-09-02 13:09:31,164 [DEBUG] Estyl Outfit params: OutfitParams(text_query='smart casual shirt, chinos, brown oxfords, sleek watch', search_with='Text', image_b64=None, gender='male', brand_contains=None, budget_tier='Mid', budget=350.0, num_outfits=5, articles=5, per_cat_candidates=5)
+2025-09-02 13:09:31,164 [DEBUG] Category 'Tops' price bounds: 30 - 64.16666666666667 (cap: 64.16666666666667) | (tier : Mid)
+2025-09-02 13:09:31,437 [DEBUG] connect_tcp.started host='unv2yy07qfybxgvelndplw.c0.europe-west3.gcp.weaviate.cloud' port=443 local_address=None timeout=5.0 socket_options=None
+2025-09-02 13:09:31,501 [DEBUG] connect_tcp.complete return_value=<httpcore._backends.sync.SyncStream object at 0x0000023A00A6D6D0>
+2025-09-02 13:09:31,502 [DEBUG] start_tls.started ssl_context=<ssl.SSLContext object at 0x0000023A00A4CC50> server_hostname='unv2yy07qfybxgvelndplw.c0.europe-west3.gcp.weaviate.cloud' timeout=5.0
+2025-09-02 13:09:31,756 [DEBUG] start_tls.complete return_value=<httpcore._backends.sync.SyncStream object at 0x0000023A00A6D5E0>
+2025-09-02 13:09:31,756 [DEBUG] send_request_headers.started request=<Request [b'GET']>
+2025-09-02 13:09:31,756 [DEBUG] send_request_headers.complete
+2025-09-02 13:09:31,756 [DEBUG] send_request_body.started request=<Request [b'GET']>
+2025-09-02 13:09:31,756 [DEBUG] send_request_body.complete
+2025-09-02 13:09:31,756 [DEBUG] receive_response_headers.started request=<Request [b'GET']>
+2025-09-02 13:09:32,189 [DEBUG] receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'access-control-allow-headers', b'Content-Type, Authorization, Batch, X-Openai-Api-Key, X-Openai-Organization, X-Openai-Baseurl, X-Anyscale-Baseurl, X-Anyscale-Api-Key, X-Cohere-Api-Key, X-Cohere-Baseurl, X-Huggingface-Api-Key, X-Azure-Api-Key, X-Azure-Deployment-Id, X-Azure-Resource-Name, X-Azure-Concurrency, X-Azure-Block-Size, X-Google-Api-Key, X-Google-Vertex-Api-Key, X-Google-Studio-Api-Key, X-Goog-Api-Key, X-Goog-Vertex-Api-Key, X-Goog-Studio-Api-Key, X-Palm-Api-Key, X-Jinaai-Api-Key, X-Aws-Access-Key, X-Aws-Secret-Key, X-Voyageai-Baseurl, X-Voyageai-Api-Key, X-Mistral-Baseurl, X-Mistral-Api-Key, X-Anthropic-Baseurl, X-Anthropic-Api-Key, X-Databricks-Endpoint, X-Databricks-Token, X-Databricks-User-Agent, X-Friendli-Token, X-Friendli-Baseurl, X-Weaviate-Api-Key, X-Weaviate-Cluster-Url, X-Nvidia-Api-Key, X-Nvidia-Baseurl'), (b'access-control-allow-methods', b'*'), (b'access-control-allow-origin', b'*'), (b'content-type', b'application/json'), (b'vary', b'Origin'), (b'date', b'Tue, 02 Sep 2025 07:39:31 GMT'), (b'x-envoy-upstream-service-time', b'6'), (b'server', b'istio-envoy'), (b'Via', b'1.1 google'), (b'Alt-Svc', b'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000'), (b'Transfer-Encoding', b'chunked')])
+2025-09-02 13:09:32,190 [INFO] HTTP Request: GET https://unv2yy07qfybxgvelndplw.c0.europe-west3.gcp.weaviate.cloud/v1/meta "HTTP/1.1 200 OK"
+2025-09-02 13:09:32,190 [DEBUG] receive_response_body.started request=<Request [b'GET']>
+2025-09-02 13:09:32,190 [DEBUG] receive_response_body.complete
+2025-09-02 13:09:32,190 [DEBUG] response_closed.started
+2025-09-02 13:09:32,190 [DEBUG] response_closed.complete
+2025-09-02 13:09:33,307 [DEBUG] connect_tcp.started host='pypi.org' port=443 local_address=None timeout=2 socket_options=None
+2025-09-02 13:09:33,415 [DEBUG] connect_tcp.complete return_value=<httpcore._backends.sync.SyncStream object at 0x0000023A00A99FD0>
+2025-09-02 13:09:33,415 [DEBUG] start_tls.started ssl_context=<ssl.SSLContext object at 0x0000023A00A4D0D0> server_hostname='pypi.org' timeout=2
+2025-09-02 13:09:33,448 [DEBUG] start_tls.complete return_value=<httpcore._backends.sync.SyncStream object at 0x0000023A00A99F10>
+2025-09-02 13:09:33,448 [DEBUG] send_request_headers.started request=<Request [b'GET']>
+2025-09-02 13:09:33,448 [DEBUG] send_request_headers.complete
+2025-09-02 13:09:33,448 [DEBUG] send_request_body.started request=<Request [b'GET']>
+2025-09-02 13:09:33,448 [DEBUG] send_request_body.complete
+2025-09-02 13:09:33,448 [DEBUG] receive_response_headers.started request=<Request [b'GET']>
+2025-09-02 13:09:33,620 [DEBUG] receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Connection', b'keep-alive'), (b'Content-Length', b'75057'), (b'access-control-expose-headers', b'X-PyPI-Last-Serial'), (b'cache-control', b'max-age=900, public'), (b'referrer-policy', b'origin-when-cross-origin'), (b'access-control-max-age', b'86400'), (b'access-control-allow-methods', b'GET'), (b'content-type', b'application/json'), (b'access-control-allow-headers', b'Content-Type, If-Match, If-Modified-Since, If-None-Match, If-Unmodified-Since'), (b'access-control-allow-origin', b'*'), (b'content-encoding', b'gzip'), (b'etag', b'"2iZKj/YeCgI869YOaFWPew"'), (b'x-pypi-last-serial', b'30791443'), (b'content-security-policy', b"base-uri 'self'; connect-src 'self' https://api.github.com/repos/ https://api.github.com/search/issues https://gitlab.com/api/ https://analytics.python.org fastly-insights.com *.fastly-insights.com *.ethicalads.io https://api.pwnedpasswords.com https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/sre/mathmaps/ https://2p66nmmycsj3.statuspage.io; default-src 'none'; font-src 'self' fonts.gstatic.com; form-action 'self' https://checkout.stripe.com https://billing.stripe.com; frame-ancestors 'none'; frame-src 'none'; img-src 'self' https://pypi-camo.freetls.fastly.net/ *.fastly-insights.com *.ethicalads.io ethicalads.blob.core.windows.net; script-src 'self' https://analytics.python.org *.fastly-insights.com *.ethicalads.io 'sha256-U3hKDidudIaxBDEzwGJApJgPEf2mWk6cfMWghrAa6i0=' https://cdn.jsdelivr.net/npm/mathjax@3.2.2/ 'sha256-1CldwzdEg2k1wTmf7s5RWVd7NMXI/7nxxjJM2C4DqII=' 'sha256-0POaN8stWYQxhzjKS+/eOfbbJ/u4YHO5ZagJvLpMypo='; style-src 'self' fonts.googleapis.com *.ethicalads.io 'sha256-2YHqZokjiizkHi1Zt+6ar0XJ0OeEy/egBnlm+MDMtrM=' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=' 'sha256-JLEjeN9e5dGsz5475WyRaoA4eQOdNPxDIeUhclnJDCE=' 'sha256-mQyxHEuwZJqpxCw3SLmc4YOySNKXunyu2Oiz1r3/wAE=' 'sha256-OCf+kv5Asiwp++8PIevKBYSgnNLNUZvxAp4a7wMLuKA=' 'sha256-h5LOiLhk6wiJrGsG5ItM0KimwzWQH/yAcmoJDJL//bY='; worker-src *.fastly-insights.com"), (b'Accept-Ranges', b'bytes'), (b'Date', b'Tue, 02 Sep 2025 07:39:33 GMT'), (b'X-Served-By', b'cache-iad-kjyo7100137-IAD, cache-iad-kjyo7100041-IAD, cache-hyd1100032-HYD'), (b'X-Cache', b'MISS, HIT, HIT'), (b'X-Cache-Hits', b'0, 955, 3'), (b'X-Timer', b'S1756798773.318083,VS0,VE0'), (b'Vary', b'Accept-Encoding'), (b'Strict-Transport-Security', b'max-age=31536000; includeSubDomains; preload'), (b'X-Frame-Options', b'deny'), (b'X-XSS-Protection', b'1; mode=block'), (b'X-Content-Type-Options', b'nosniff'), (b'X-Permitted-Cross-Domain-Policies', b'none'), (b'Permissions-Policy', b'publickey-credentials-create=(self),publickey-credentials-get=(self),accelerometer=(),ambient-light-sensor=(),autoplay=(),battery=(),camera=(),display-capture=(),document-domain=(),encrypted-media=(),execution-while-not-rendered=(),execution-while-out-of-viewport=(),fullscreen=(),gamepad=(),geolocation=(),gyroscope=(),hid=(),identity-credentials-get=(),idle-detection=(),local-fonts=(),magnetometer=(),microphone=(),midi=(),otp-credentials=(),payment=(),picture-in-picture=(),screen-wake-lock=(),serial=(),speaker-selection=(),storage-access=(),usb=(),web-share=(),xr-spatial-tracking=()')])
+2025-09-02 13:09:33,621 [INFO] HTTP Request: GET https://pypi.org/pypi/weaviate-client/json "HTTP/1.1 200 OK"
+2025-09-02 13:09:33,621 [DEBUG] receive_response_body.started request=<Request [b'GET']>
+2025-09-02 13:09:33,722 [DEBUG] receive_response_body.complete
+2025-09-02 13:09:33,722 [DEBUG] response_closed.started
+2025-09-02 13:09:33,722 [DEBUG] response_closed.complete
+2025-09-02 13:09:33,722 [DEBUG] close.started
+2025-09-02 13:09:33,723 [DEBUG] close.complete
+2025-09-02 13:09:33,725 [DEBUG] Running hybrid search with query=smart casual shirt, chinos, brown oxfords, sleek watch Tops, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A009A8CE0>
+2025-09-02 13:09:34,436 [DEBUG] Got 10 objects back
+2025-09-02 13:09:34,441 [DEBUG] Starting new HTTPS connection (1): huggingface.co:443
+2025-09-02 13:09:35,310 [DEBUG] https://huggingface.co:443 "HEAD /openai/clip-vit-base-patch32/resolve/main/config.json HTTP/1.1" 307 0
+2025-09-02 13:09:35,339 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/openai/clip-vit-base-patch32/3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268/config.json HTTP/1.1" 200 0
+2025-09-02 13:09:35,583 [DEBUG] https://huggingface.co:443 "HEAD /openai/clip-vit-base-patch32/resolve/main/config.json HTTP/1.1" 307 0
+2025-09-02 13:09:35,612 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/openai/clip-vit-base-patch32/3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268/config.json HTTP/1.1" 200 0
+2025-09-02 13:09:35,869 [DEBUG] https://huggingface.co:443 "HEAD /openai/clip-vit-base-patch32/resolve/main/model.safetensors HTTP/1.1" 404 0
+2025-09-02 13:09:35,873 [DEBUG] Starting new HTTPS connection (1): huggingface.co:443
+2025-09-02 13:09:36,588 [DEBUG] https://huggingface.co:443 "GET /api/models/openai/clip-vit-base-patch32/revision/main HTTP/1.1" 200 4976
+2025-09-02 13:09:36,600 [DEBUG] https://huggingface.co:443 "GET /api/models/openai/clip-vit-base-patch32 HTTP/1.1" 200 4976
+2025-09-02 13:09:36,845 [DEBUG] https://huggingface.co:443 "HEAD /openai/clip-vit-base-patch32/resolve/main/tokenizer_config.json HTTP/1.1" 307 0
+2025-09-02 13:09:36,860 [DEBUG] https://huggingface.co:443 "GET /api/models/openai/clip-vit-base-patch32/commits/main HTTP/1.1" 200 4272
+2025-09-02 13:09:36,873 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/openai/clip-vit-base-patch32/3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268/tokenizer_config.json HTTP/1.1" 200 0
+2025-09-02 13:09:37,135 [DEBUG] https://huggingface.co:443 "GET /api/models/openai/clip-vit-base-patch32/discussions?p=0 HTTP/1.1" 200 33539
+2025-09-02 13:09:37,151 [DEBUG] https://huggingface.co:443 "GET /api/models/openai/clip-vit-base-patch32/tree/main/additional_chat_templates?recursive=False&expand=False HTTP/1.1" 404 64
+2025-09-02 13:09:37,410 [DEBUG] https://huggingface.co:443 "GET /api/models/openai/clip-vit-base-patch32/commits/refs%2Fpr%2F62 HTTP/1.1" 200 5237
+2025-09-02 13:09:37,511 [DEBUG] https://huggingface.co:443 "GET /api/models/openai/clip-vit-base-patch32/tree/main/additional_chat_templates?recursive=False&expand=False HTTP/1.1" 404 64
+2025-09-02 13:09:37,668 [DEBUG] https://huggingface.co:443 "HEAD /openai/clip-vit-base-patch32/resolve/refs%2Fpr%2F62/model.safetensors.index.json HTTP/1.1" 404 0
+2025-09-02 13:09:37,777 [DEBUG] https://huggingface.co:443 "HEAD /openai/clip-vit-base-patch32/resolve/main/processor_config.json HTTP/1.1" 404 0
+2025-09-02 13:09:37,923 [DEBUG] https://huggingface.co:443 "HEAD /openai/clip-vit-base-patch32/resolve/refs%2Fpr%2F62/model.safetensors HTTP/1.1" 302 0
+2025-09-02 13:09:38,023 [DEBUG] https://huggingface.co:443 "HEAD /openai/clip-vit-base-patch32/resolve/main/chat_template.json HTTP/1.1" 404 0
+2025-09-02 13:09:38,294 [DEBUG] https://huggingface.co:443 "HEAD /openai/clip-vit-base-patch32/resolve/main/chat_template.jinja HTTP/1.1" 404 0
+2025-09-02 13:09:38,537 [DEBUG] https://huggingface.co:443 "HEAD /openai/clip-vit-base-patch32/resolve/main/audio_tokenizer_config.json HTTP/1.1" 404 0
+2025-09-02 13:09:38,919 [DEBUG] Category 'Bottoms' price bounds: 60 - 72.91666666666667 (cap: 72.91666666666667) | (tier : Mid)
+2025-09-02 13:09:38,919 [DEBUG] Running hybrid search with query=Bottoms, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A01C76630>
+2025-09-02 13:09:39,470 [DEBUG] Got 10 objects back
+2025-09-02 13:09:39,705 [DEBUG] Category 'Shoes' price bounds: 80 - 87.5 (cap: 87.5) | (tier : Mid)
+2025-09-02 13:09:39,705 [DEBUG] Running hybrid search with query=Shoes, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A34500>
+2025-09-02 13:09:40,253 [DEBUG] Got 10 objects back
+2025-09-02 13:09:40,481 [DEBUG] Category 'Outerwear' price bounds: 120 - 102.08333333333334 (cap: 102.08333333333334) | (tier : Mid)
+2025-09-02 13:09:40,481 [DEBUG] Running hybrid search with query=Outerwear, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A99B20>
+2025-09-02 13:09:40,924 [DEBUG] Got 0 objects back
+2025-09-02 13:09:40,924 [DEBUG] Category 'Accessories' price bounds: 30 - 23.333333333333332 (cap: 23.333333333333332) | (tier : Mid)
+2025-09-02 13:09:40,925 [DEBUG] Running hybrid search with query=Accessories, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A01C76930>
+2025-09-02 13:09:41,405 [DEBUG] Got 0 objects back
+2025-09-02 13:09:41,405 [DEBUG] Category 'Tops' price bounds: 30 - 64.16666666666667 (cap: 64.16666666666667) | (tier : Mid)
+2025-09-02 13:09:41,406 [DEBUG] Running hybrid search with query=smart casual shirt, chinos, brown oxfords, sleek watch Tops, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A35A90>
+2025-09-02 13:09:42,516 [DEBUG] Got 10 objects back
+2025-09-02 13:09:42,742 [DEBUG] Category 'Bottoms' price bounds: 60 - 72.91666666666667 (cap: 72.91666666666667) | (tier : Mid)
+2025-09-02 13:09:42,742 [DEBUG] Running hybrid search with query=Bottoms, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A9AF30>
+2025-09-02 13:09:43,231 [DEBUG] Got 10 objects back
+2025-09-02 13:09:43,443 [DEBUG] Category 'Shoes' price bounds: 80 - 87.5 (cap: 87.5) | (tier : Mid)
+2025-09-02 13:09:43,443 [DEBUG] Running hybrid search with query=Shoes, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A01C77710>
+2025-09-02 13:09:44,076 [DEBUG] Got 10 objects back
+2025-09-02 13:09:44,281 [DEBUG] Category 'Outerwear' price bounds: 120 - 102.08333333333334 (cap: 102.08333333333334) | (tier : Mid)
+2025-09-02 13:09:44,281 [DEBUG] Running hybrid search with query=Outerwear, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A9B0E0>
+2025-09-02 13:09:44,696 [DEBUG] Got 0 objects back
+2025-09-02 13:09:44,696 [DEBUG] Category 'Accessories' price bounds: 30 - 23.333333333333332 (cap: 23.333333333333332) | (tier : Mid)
+2025-09-02 13:09:44,697 [DEBUG] Running hybrid search with query=Accessories, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A9B140>
+2025-09-02 13:09:45,129 [DEBUG] Got 0 objects back
+2025-09-02 13:09:45,129 [DEBUG] Category 'Tops' price bounds: 30 - 64.16666666666667 (cap: 64.16666666666667) | (tier : Mid)
+2025-09-02 13:09:45,129 [DEBUG] Running hybrid search with query=smart casual shirt, chinos, brown oxfords, sleek watch Tops, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A34500>
+2025-09-02 13:09:45,826 [DEBUG] Got 10 objects back
+2025-09-02 13:09:46,042 [DEBUG] Category 'Bottoms' price bounds: 60 - 72.91666666666667 (cap: 72.91666666666667) | (tier : Mid)
+2025-09-02 13:09:46,043 [DEBUG] Running hybrid search with query=Bottoms, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A9A8A0>
+2025-09-02 13:09:46,546 [DEBUG] Got 10 objects back
+2025-09-02 13:09:46,759 [DEBUG] Category 'Shoes' price bounds: 80 - 87.5 (cap: 87.5) | (tier : Mid)
+2025-09-02 13:09:46,759 [DEBUG] Running hybrid search with query=Shoes, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A9BB60>
+2025-09-02 13:09:47,262 [DEBUG] Got 10 objects back
+2025-09-02 13:09:47,475 [DEBUG] Category 'Outerwear' price bounds: 120 - 102.08333333333334 (cap: 102.08333333333334) | (tier : Mid)
+2025-09-02 13:09:47,475 [DEBUG] Running hybrid search with query=Outerwear, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A9B0E0>
+2025-09-02 13:09:47,967 [DEBUG] Got 0 objects back
+2025-09-02 13:09:47,967 [DEBUG] Category 'Accessories' price bounds: 30 - 23.333333333333332 (cap: 23.333333333333332) | (tier : Mid)
+2025-09-02 13:09:47,967 [DEBUG] Running hybrid search with query=Accessories, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A01C74AA0>
+2025-09-02 13:09:48,378 [DEBUG] Got 0 objects back
+2025-09-02 13:09:48,378 [DEBUG] Category 'Tops' price bounds: 30 - 64.16666666666667 (cap: 64.16666666666667) | (tier : Mid)
+2025-09-02 13:09:48,379 [DEBUG] Running hybrid search with query=smart casual shirt, chinos, brown oxfords, sleek watch Tops, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A34500>
+2025-09-02 13:09:49,018 [DEBUG] Got 10 objects back
+2025-09-02 13:09:49,222 [DEBUG] Category 'Bottoms' price bounds: 60 - 72.91666666666667 (cap: 72.91666666666667) | (tier : Mid)
+2025-09-02 13:09:49,223 [DEBUG] Running hybrid search with query=Bottoms, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A9BD40>
+2025-09-02 13:09:49,754 [DEBUG] Got 10 objects back
+2025-09-02 13:09:49,960 [DEBUG] Category 'Shoes' price bounds: 80 - 87.5 (cap: 87.5) | (tier : Mid)
+2025-09-02 13:09:49,960 [DEBUG] Running hybrid search with query=Shoes, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A01C74D10>
+2025-09-02 13:09:50,415 [DEBUG] Got 10 objects back
+2025-09-02 13:09:50,657 [DEBUG] Category 'Outerwear' price bounds: 120 - 102.08333333333334 (cap: 102.08333333333334) | (tier : Mid)
+2025-09-02 13:09:50,658 [DEBUG] Running hybrid search with query=Outerwear, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A9A210>
+2025-09-02 13:09:51,077 [DEBUG] Got 0 objects back
+2025-09-02 13:09:51,077 [DEBUG] Category 'Accessories' price bounds: 30 - 23.333333333333332 (cap: 23.333333333333332) | (tier : Mid)
+2025-09-02 13:09:51,077 [DEBUG] Running hybrid search with query=Accessories, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A9BB90>
+2025-09-02 13:09:51,513 [DEBUG] Got 0 objects back
+2025-09-02 13:09:51,513 [DEBUG] Category 'Tops' price bounds: 30 - 64.16666666666667 (cap: 64.16666666666667) | (tier : Mid)
+2025-09-02 13:09:51,514 [DEBUG] Running hybrid search with query=smart casual shirt, chinos, brown oxfords, sleek watch Tops, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A35A90>
+2025-09-02 13:09:52,114 [DEBUG] Got 10 objects back
+2025-09-02 13:09:52,335 [DEBUG] Category 'Bottoms' price bounds: 60 - 72.91666666666667 (cap: 72.91666666666667) | (tier : Mid)
+2025-09-02 13:09:52,335 [DEBUG] Running hybrid search with query=Bottoms, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A9BB60>
+2025-09-02 13:09:52,857 [DEBUG] Got 10 objects back
+2025-09-02 13:09:53,062 [DEBUG] Category 'Shoes' price bounds: 80 - 87.5 (cap: 87.5) | (tier : Mid)
+2025-09-02 13:09:53,062 [DEBUG] Running hybrid search with query=Shoes, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A9B5F0>
+2025-09-02 13:09:53,637 [DEBUG] Got 10 objects back
+2025-09-02 13:09:53,837 [DEBUG] Category 'Outerwear' price bounds: 120 - 102.08333333333334 (cap: 102.08333333333334) | (tier : Mid)
+2025-09-02 13:09:53,837 [DEBUG] Running hybrid search with query=Outerwear, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A00A9B170>
+2025-09-02 13:09:54,261 [DEBUG] Got 0 objects back
+2025-09-02 13:09:54,262 [DEBUG] Category 'Accessories' price bounds: 30 - 23.333333333333332 (cap: 23.333333333333332) | (tier : Mid)
+2025-09-02 13:09:54,262 [DEBUG] Running hybrid search with query=Accessories, limit=10, filters=<weaviate.collections.classes.filters._FilterAnd object at 0x0000023A01C76630>
+2025-09-02 13:09:54,711 [DEBUG] Got 0 objects back
+2025-09-02 13:09:54,716 [DEBUG] Response sent
+2025-09-02 13:09:54,719 [DEBUG] Received message: <mcp.shared.session.RequestResponder object at 0x0000023A01C77020>
+2025-09-02 13:09:54,719 [INFO] Processing request of type ListToolsRequest
+2025-09-02 13:09:54,719 [DEBUG] Dispatching request of type ListToolsRequest
+2025-09-02 13:09:54,720 [DEBUG] Response sent
