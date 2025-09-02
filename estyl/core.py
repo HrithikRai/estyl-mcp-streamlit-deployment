@@ -352,6 +352,14 @@ def retrieve_single_items(p: SingleSearchParams) -> Dict[str, Any]:
 # ------------------------
 # Public API: Outfit composer
 # ------------------------
+OPTIONAL_CATEGORIES = {
+    "Outerwear",
+    "Accessories",
+    "Jewelry & Watches",
+    "Bags",
+    "Small Leather Goods",
+}
+
 def _build_category_filters(cat: str, gender: str, tier: str, brand: Optional[str], cap: Optional[float]) -> Optional[Filter]:
     lo, hi = _price_bounds_for(cat, tier)
     if cap is not None:
@@ -372,6 +380,65 @@ def _compute_category_caps(cats_in_outfit, total_budget):
     s = sum(weights) or 1.0
     return {c: float(total_budget * (w / s)) for c, w in zip(cats_in_outfit, weights)}
 
+def call_llm_plan_safe(event, categories, budget, style_prefs = "", num_outfits=1):
+        """Try OpenAI planner; fall back to None if not configured/usable."""
+        try:
+            # Prefer OpenAI v1 client if available
+            try:
+                from openai import OpenAI
+                _client = OpenAI()
+                resp = _client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You output only valid JSON: a LIST of outfit objects keyed by your provided categories."},
+                        {"role": "user", "content": f"""
+Create {num_outfits} outfit plans as a JSON LIST. Use these exact categories only:
+{categories}
+
+Constraints:
+- Event: {event}
+- Total budget (EUR): {budget}
+- Style/brand hints: {style_prefs}
+
+Output example (LIST):
+[
+  {{"Tops": "white oxford shirt, slim fit", "Bottoms": "navy tailored trousers", "Shoes": "black leather oxford shoes"}}
+]
+"""}
+                    ],
+                    temperature=0.5,
+                )
+                raw = resp.choices[0].message.content.strip()
+            except Exception:
+                # Older SDKs: try module-level call; still fully optional
+                raw = None
+
+            if not raw:
+                return None
+
+            # Parse + canonicalize
+            data = json.loads(raw)
+            if isinstance(data, dict) and "outfits" in data:
+                data = data["outfits"]
+            if isinstance(data, dict):
+                data = [data]
+
+            plans = []
+            for outfit in (data or []):
+                if not isinstance(outfit, dict):
+                    continue
+                plan = {}
+                for k, v in outfit.items():
+                    cat = canonicalize_category(k) or k
+                    if cat in categories:
+                        plan[cat] = v if isinstance(v, str) else " ".join(v) if isinstance(v, list) else str(v)
+                # Ensure we only keep requested categories in order
+                plan = {c: plan.get(c, f"{event} {c} {style_prefs or ''}".strip()) for c in categories}
+                plans.append(plan)
+            return plans or None
+        except Exception:
+            return None
+        
 def _lm_fallback_plan(num_outfits, cats, text_query, brand_hint):
     plans = []
     base = (text_query or "").strip()
@@ -389,7 +456,12 @@ def _lm_fallback_plan(num_outfits, cats, text_query, brand_hint):
 def compose_outfits(p: OutfitParams) -> Dict[str, Any]:
     # Determine categories by article count
     cats = OUTFIT_ORDER_BY_N[5 if p.articles >= 5 else p.articles]
-    plan = _lm_fallback_plan(p.num_outfits, cats, p.text_query, p.brand_contains)
+    plan = call_llm_plan_safe(
+            event=p.text_query,
+            categories=cats,
+            budget=p.budget,
+            num_outfits=p.num_outfits,
+        ) or _lm_fallback_plan(p.num_outfits, cats, p.text_query, p.brand_contains)
 
     img_bytes = _bytes_from_b64(p.image_b64)
     used_ids = set()
@@ -403,6 +475,7 @@ def compose_outfits(p: OutfitParams) -> Dict[str, Any]:
 
         # retrieve per-category candidates
         candidates_map = {}
+        missing_cats = []
         for cat in cats_in_this:
             f = _build_category_filters(cat, p.gender, p.budget_tier, p.brand_contains, caps.get(cat))
             objs = do_hybrid_search(
@@ -418,12 +491,22 @@ def compose_outfits(p: OutfitParams) -> Dict[str, Any]:
                 reranked = lightweight_rerank(objs[:max(8, p.per_cat_candidates*2)], outfit_plan.get(cat, ""), None)
 
             filtered = [o for o in reranked if o.uuid not in used_ids][:p.per_cat_candidates]
+
+            if not filtered:
+                logger.debug(f"⚠️ No candidates found for category {cat}, skipping.")
+                missing_cats.append(cat)
+                continue
+
             candidates_map[cat] = filtered
 
-        if any(len(candidates_map.get(c, [])) == 0 for c in cats_in_this):
+        # If absolutely nothing found → skip outfit entirely
+        if not candidates_map:
+            logger.debug(f"❌ Skipping outfit {outfit_idx}, all categories empty")
             continue
 
-        cand_lists = [candidates_map[c] for c in cats_in_this]
+        cand_lists = [candidates_map[c] for c in candidates_map.keys()]
+        cats_in_this = list(candidates_map.keys())  # update to only include those with results
+
         best_combo = None
         best_score = -1e9
         best_price = 1e12
@@ -472,15 +555,31 @@ def compose_outfits(p: OutfitParams) -> Dict[str, Any]:
                 combo, total_price = best_over
                 for o in combo: used_ids.add(o.uuid)
                 out_items = [asdict(_serialize_item(o)) for o in combo]
-                near_misses.append({"items": out_items, "total_price": total_price})
-                all_outfits.append({"items": out_items, "total_price": total_price})
+                near_misses.append({
+                    "items": out_items,
+                    "total_price": total_price,
+                    "missing_categories": missing_cats
+                })
+                all_outfits.append({
+                    "items": out_items,
+                    "total_price": total_price,
+                    "missing_categories": missing_cats
+                })
             continue
 
         final_list = list(best_combo)
         for o in final_list: used_ids.add(o.uuid)
         out_items = [asdict(_serialize_item(o)) for o in final_list]
-        valid_outfits.append({"items": out_items, "total_price": best_price})
-        all_outfits.append({"items": out_items, "total_price": best_price})
+        valid_outfits.append({
+            "items": out_items,
+            "total_price": best_price,
+            "missing_categories": missing_cats
+        })
+        all_outfits.append({
+            "items": out_items,
+            "total_price": best_price,
+            "missing_categories": missing_cats
+        })
 
     return {
         "valid_outfits": valid_outfits,
