@@ -1,27 +1,73 @@
 from __future__ import annotations
 import asyncio, json, os, sys
-from typing import Dict, Any
-
-from openai import OpenAI
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-
-import logging
-logging.basicConfig(level=logging.DEBUG)
+from typing import Dict, Any, List, Optional
 
 from dotenv import load_dotenv
-load_dotenv()  
-import aioconsole
+load_dotenv()
 
+import logging
+logging.basicConfig(level=logging.INFO)
 
-client = OpenAI()
+from openai import AsyncOpenAI
+from mcp import ClientSession, StdioServerParameters, types
+from mcp.client.stdio import stdio_client
 
-def load_style_yaml(path: str = "style_guide.yaml") -> str:
-    with open(path, "r", encoding="utf-8") as f:
-        data = f.read()
-    return data
+# ---------- Config ----------
+MODEL = "gpt-4o-mini"
+MAX_HISTORY_TURNS = 10          # keep last N user/assistant pairs (+ system)
 
-# Tool schema for function calling
+# ---------- OpenAI client (async, reused) ----------
+client = AsyncOpenAI()
+
+def load_style_yaml(path: str = "estyl/style_guide.yaml") -> str:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        logging.warning("style_guide.yaml not found; continuing without it.")
+        return ""
+
+STYLE_YAML = load_style_yaml()
+
+SYSTEM_PROMPT = f"""You are Estyl, a fashion shopping assistant powered by tools.
+
+You have access to the following tool : `estyl_retrieve`:
+- Call the tool whenever the user asks for product suggestions, searching, filtering, budgeted looks, or outfits.
+- If a query is vague or missing details, you may ask at most 1–2 short clarifying questions.
+- As soon as you have enough context to form a reasonable search (even with some fields missing), 
+  immediately call the tool with the best arguments you can infer. 
+- After showing results, you can continue asking refinements (e.g. “Want something more premium?”) and make follow-up tool calls.
+- Always prefer action → ask → retrieve → refine.
+
+- Free-chat if the user only asks for generic fashion advice with no need for catalog retrieval. Treat the STYLE GUIDE YAML below as binding rules during your entire conversation:
+{STYLE_YAML}
+
+## Inspiration Handling
+- When the user asks for an inspiration (celebrity, city, aesthetic), always answer with 
+  concrete outfit suggestions: 2–3 clothing items + optional accessory.
+- Focus on clothing and fashion accessories (bags, shoes, jewelry).
+- Do not suggest cosmetics, makeup, or beauty products.
+- Phrase it as: “For a [X]-inspired look, consider …” and list pieces with a short reason.
+
+## Off-Topic Handling
+- If the user asks about something unrelated to fashion/clothing/outfits:
+  • Politely refuse with a warm sentence.
+  • Redirect gently back to fashion help.
+
+## Other Behavior
+- If user uses inappropriate or toxic language, respond with a light, style-focused redirect.
+- If user rejects (“too expensive / not my style”), ask 1 decisive fix question.
+- Mirror user’s language.
+
+## Output Formatting
+Always output results with the following properties:
+- title (string)
+- price (float)
+- product_url (string)
+- image_url (string)
+- Do not include extra commentary, markdown, or descriptions. Just bullets of items.
+"""
+
 OPENAI_TOOLS = [
     {
         "type": "function",
@@ -53,89 +99,120 @@ OPENAI_TOOLS = [
     }
 ]
 
-tov = load_style_yaml()
-SYSTEM_PROMPT = """You are Estyl, a friendly fashion assistant.
+# ---------- Helpers ----------
 
-Decide when to call the `estyl_retrieve` tool:
-- Call the tool if the user asks for product suggestions, searching, filtering, budgeted looks, or outfits.
-- Free-chat if the user only asks for generic fashion advice with no need for catalog retrieval. 
 
-Treat the STYLE GUIDE YAML below as binding rules during your entire conversation:
-{tov}
+def content_text(msg) -> str:
+    """
+    OpenAI SDK may return message.content as a string or a list of content parts.
+    Normalize to plain text.
+    """
+    c = getattr(msg, "content", None)
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        out = []
+        for part in c:
+            # text parts usually look like {"type":"text","text":"..."}
+            t = part.get("text") if isinstance(part, dict) else None
+            if t:
+                out.append(t)
+        return "\n".join(out)
+    return ""
 
-## Inspiration Handling
-- When the user asks for an inspiration (celebrity, city, aesthetic), always answer with 
-  concrete outfit suggestions: 2–3 clothing items + optional accessory.  
-- Focus on clothing and fashion accessories (bags, shoes, jewelry).  
-- Do not suggest cosmetics, makeup, or beauty products.  
-- Phrase it as: “For a [X]-inspired look, consider …” and list pieces with a short reason.  
+def cap_history(history: List[Dict[str, Any]], max_turns: int = MAX_HISTORY_TURNS) -> List[Dict[str, Any]]:
+    # keep system + last N*2 turns (user+assistant)
+    if not history:
+        return history
+    sys_msgs = [m for m in history if m.get("role") == "system"]
+    others = [m for m in history if m.get("role") != "system"]
+    keep = others[-(max_turns * 2):]
+    return sys_msgs[:1] + keep
 
-## Off-Topic Handling
-- If the user asks about something completely unrelated to fashion/clothing/outfits:
-  • Politely refuse with a warm sentence.  
-  • Redirect gently back to fashion help.  
-
-## Other Behavior
-- If user uses inappropriate or toxic language, respond with a light, style-focused redirect. Never repeat the exact same phrasing; vary between them.
-- If user rejects (“too expensive / not my style”), ask 1 decisive fix question.  
-- Mirror user’s language. 
-
-"""
-
+# ---------- Main run loop (CLI demo, non-streaming) ----------
 async def run_chat():
     params = StdioServerParameters(
         command=sys.executable,
-        args=["-m","estyl.mcp_server"],
+        args=["-m", "estyl.mcp_server"],
         env=os.environ.copy(),
     )
 
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
+            await session.list_tools()
+            history: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+            print("Estyl chat ready. Type your message. Ctrl+C or /exit to quit.")
 
-            history = [{"role":"system","content":SYSTEM_PROMPT}]
-
-            print("Estyl chat ready. Type your message. Ctrl+C to exit.")
             while True:
-                user = input("you> ").strip()
-                if not user: continue
-                history.append({"role":"user","content":user})
+                try:
+                    user = input("you> ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    print("\n👋 Bye!")
+                    return
+                if not user:
+                    continue
+                if user.lower() in {"/exit", "/quit"}:
+                    print("👋 Bye!")
+                    return
 
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
+                history.append({"role": "user", "content": user})
+                history = cap_history(history)
+
+                # First call: let the model decide on tool usage
+                resp = await client.chat.completions.create(
+                    model=MODEL,
                     messages=history,
                     tools=OPENAI_TOOLS,
                 )
                 msg = resp.choices[0].message
+
                 if msg.tool_calls:
+                    # Handle only the first tool call for speed; you can loop if you allow chains.
                     tc = msg.tool_calls[0]
                     if tc.function.name == "estyl_retrieve":
                         args = json.loads(tc.function.arguments or "{}")
 
-                        # Invoke MCP retrieval tool
+                        # Call MCP tool
                         result = await session.call_tool("estyl_retrieve", args)
                         tool_output = result.content[0].text if result.content else "{}"
-
-                        # Feed tool result back to the model
+                        # Feed tool result back (omit tools here to force final answer)
                         history.append({
-                            "role":"assistant",
-                            "tool_calls":[{"id":tc.id,"type":"function","function":{"name":"estyl_retrieve","arguments":json.dumps(args)}}]
+                            "role": "assistant",
+                            "tool_calls": [{
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {"name": "estyl_retrieve", "arguments": json.dumps(args)}
+                            }]
                         })
-                        history.append({"role":"tool","tool_call_id":tc.id,"name":"estyl_retrieve","content":tool_output})
+                        history.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "name": "estyl_retrieve",
+                            "content": tool_output,
+                        })
+                        history = cap_history(history)
 
-                        final = client.chat.completions.create(
-                            model="gpt-4o-mini",
-                            messages=history
+                        final = await client.chat.completions.create(
+                            model=MODEL,
+                            messages=history,
+
                         )
-                        answer = final.choices[0].message.content
+                        answer = content_text(final.choices[0].message)
                         print(f"estyl> {answer}\n")
-                        history.append({"role":"assistant","content":answer})
+                        history.append({"role": "assistant", "content": answer})
+                        history = cap_history(history)
                     else:
-                        print("estyl> (unrecognized tool request)")
+                        print("estyl> (unrecognized tool request)\n")
+                        history.append({"role": "assistant", "content": "(unrecognized tool request)"})
                 else:
-                    answer = msg.content
+                    answer = content_text(msg)
                     print(f"estyl> {answer}\n")
-                    history.append({"role":"assistant","content":answer})
+                    history.append({"role": "assistant", "content": answer})
+                    history = cap_history(history)
 
 if __name__ == "__main__":
-    asyncio.run(run_chat())
+    try:
+        asyncio.run(run_chat())
+    except KeyboardInterrupt:
+        print("\n👋 Bye!")
