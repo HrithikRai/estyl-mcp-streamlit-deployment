@@ -1,7 +1,8 @@
 from __future__ import annotations
 import asyncio, json, os, sys
 from typing import Dict, Any, List
-
+import datetime
+import atexit
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -13,7 +14,8 @@ from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 
 MODEL = "gpt-4o-mini"
-MAX_HISTORY_TURNS = 10          
+MAX_HISTORY_TURNS = 5          
+HISTORY_FILE = "chat_history.txt"
 
 client = AsyncOpenAI()
 
@@ -31,6 +33,8 @@ SYSTEM_PROMPT = f"""You are Estyl, a fashion shopping assistant powered by tools
 
 You have access to the following tool : `estyl_retrieve`:
 - It has two modes: "single" (retrieve items from a single category) and "outfit" (retrieve items using more than one category).
+- If mode is "single", you must always suggest 10 items.
+- If mode is "outfit", you must always suggest 5 outfits, each with articles depending on user budget, occasion and preferences.
 - Call the tool whenever the user asks for product suggestions, searching, filtering, budgeted looks, or outfits.
 - If a query is vague or missing details, you may ask at most 1–2 short clarifying questions.
 - After showing results, you can continue asking refinements (e.g. “Want something more premium?”) and make follow-up tool calls.
@@ -111,24 +115,38 @@ async def run_chat():
         async with ClientSession(read, write) as session:
             await session.initialize()
             await session.list_tools()
-            history: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+            full_history: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+            history: List[Dict[str, Any]] = full_history.copy()  # capped for LLM
             print("Estyl chat ready. Type your message. Ctrl+C or /exit to quit.")
-
+            def save_history_to_file():
+                try:
+                    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+                        for msg in full_history:
+                            role = msg.get("role")
+                            content = content_text(msg)
+                            f.write(f"{role}: {content}\n")
+                    print(f"\n Full chat history saved to {HISTORY_FILE}")
+                except Exception as e:
+                    print(f"Failed to save chat history: {e}")
+            
+            atexit.register(save_history_to_file)
             while True:
                 try:
                     user = input("you> ").strip()
                 except (EOFError, KeyboardInterrupt):
-                    print("\n👋 Bye!")
+                    print("\n Bye!")
+                    save_history_to_file()
                     return
                 if not user:
                     continue
                 if user.lower() in {"/exit", "/quit"}:
-                    print("👋 Bye!")
+                    print(" Bye!")
+                    save_history_to_file()
                     return
 
                 history.append({"role": "user", "content": user})
                 history = cap_history(history)
-
+                full_history.append({"role": "user", "content": user})
                 resp = await client.chat.completions.create(
                     model=MODEL,
                     messages=history,
@@ -157,6 +175,7 @@ async def run_chat():
                             "content": tool_output,
                         })
                         history = cap_history(history)
+                        full_history.append(history)
 
                         final = await client.chat.completions.create(
                             model=MODEL,
@@ -167,6 +186,7 @@ async def run_chat():
                         print(f"estyl> {answer}\n")
                         history.append({"role": "assistant", "content": answer})
                         history = cap_history(history)
+                        full_history.append(history)
                     else:
                         print("estyl> (unrecognized tool request)\n")
                         history.append({"role": "assistant", "content": "(unrecognized tool request)"})
@@ -175,9 +195,10 @@ async def run_chat():
                     print(f"estyl> {answer}\n")
                     history.append({"role": "assistant", "content": answer})
                     history = cap_history(history)
+                    full_history.append(history)
 
 if __name__ == "__main__":
     try:
         asyncio.run(run_chat())
     except KeyboardInterrupt:
-        print("\n👋 Bye!")
+        print("\n Bye!")

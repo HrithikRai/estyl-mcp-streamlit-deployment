@@ -176,12 +176,9 @@ def build_filters(
 def _compose_rerank_text(p: Dict) -> str:
     return " | ".join([
         str(p.get("title","")),
-        str(p.get("brand","")),
-        str(p.get("category","")),
-        str(p.get("color","")),
+        str(p.get("description",""),
         str(p.get("image_caption","")),
-        str(p.get("unique_features","")),
-        str(p.get("description",""))[:400],
+        )[:400],
     ])
 
 def lightweight_rerank(objs, query_text: str, query_img_vec: Optional[np.ndarray]):
@@ -482,11 +479,123 @@ def _lm_fallback_plan(num_outfits, cats, text_query, brand_hint):
 
 # ------------ OUTFIT BEAM SEARCH ------------
 
-def compose_outfits(p: OutfitParams, beam_width: int = 10) -> Dict[str, Any]:
+# def compose_outfits(p: OutfitParams, beam_width: int = 10) -> Dict[str, Any]:
+#     """
+#     Compose outfits using beam search instead of full itertools.product to handle
+#     multiple categories and per-category candidates efficiently.
+#     """
+#     cats = OUTFIT_ORDER_BY_N[5 if p.articles >= 5 else p.articles]
+#     plan = call_llm_plan_safe(
+#         event=p.text_query,
+#         categories=cats,
+#         budget=p.budget,
+#         num_outfits=p.num_outfits,
+#     ) or _lm_fallback_plan(p.num_outfits, cats, p.text_query, p.brand_contains)
+
+#     img_bytes = _bytes_from_b64(p.image_b64)
+#     image_vec = embed_image(img_bytes) if img_bytes and p.search_with in ("Image", "Text + Image") else None
+
+#     rerank_fn = (lambda objs, q: fashionclip_rerank(objs, q, img_bytes)) if ALLOW_FCLIP_RERANK \
+#                 else (lambda objs, q: lightweight_rerank(objs, q, image_vec))
+
+#     used_ids = set()
+#     valid_outfits, near_misses, all_outfits = [], [], []
+
+#     for outfit_idx in range(min(p.num_outfits, len(plan))):
+#         outfit_plan = plan[outfit_idx]
+#         cats_in_this = list(outfit_plan.keys())
+#         total_budget = p.budget if p.budget is not None else 350.0
+#         caps = _compute_category_caps(cats_in_this, total_budget)
+
+#         candidates_map, missing_cats = {}, []
+#         for cat in cats_in_this:
+#             f = _build_category_filters(cat, p.gender, p.budget, p.brand_contains, caps.get(cat))
+#             objs = do_hybrid_search(
+#                 text_query=(outfit_plan.get(cat) or f"{p.text_query} {cat} {p.brand_contains}".strip()),
+#                 text_vec=None, image_vec=None,
+#                 limit=max(6, p.per_cat_candidates * 2),
+#                 filters=f,
+#             )
+#             reranked = rerank_fn(objs[:max(6, p.per_cat_candidates * 2)], outfit_plan.get(cat, ""))
+#             # precompute price
+#             for o in reranked:
+#                 try:
+#                     o._price = _normalize_price((o.properties or {}).get("price", 0))
+#                 except Exception:
+#                     o._price = 0.0
+#             filtered = [o for o in reranked if o.uuid not in used_ids][:p.per_cat_candidates]
+#             if not filtered:
+#                 missing_cats.append(cat)
+#                 continue
+#             candidates_map[cat] = filtered
+
+#         if not candidates_map:
+#             logger.debug(f"Skipping outfit {outfit_idx}, all categories empty")
+#             continue
+
+#         cand_lists = list(candidates_map.values())
+#         cats_in_this = list(candidates_map.keys())
+
+#         # precompute rank scores
+#         rank_scores = []
+#         for lst in cand_lists:
+#             n = max(1, len(lst))
+#             rank_scores.append({o.uuid: _score_rank_order(i, n) for i, o in enumerate(lst)})
+
+#         # -------- BEAM SEARCH IMPLEMENTATION --------
+#         beam = [([], 0.0, 0.0)]  # list of tuples: (partial_combo, score_so_far, price_so_far)
+
+#         for cat_idx, lst in enumerate(cand_lists):
+#             new_beam = []
+#             for partial, score_so_far, price_so_far in beam:
+#                 for o in lst:
+#                     if o.uuid in {x.uuid for x in partial}:
+#                         continue  # skip duplicates
+#                     cap = caps.get(cats_in_this[cat_idx]) or (total_budget / len(cats_in_this))
+#                     s_rank = rank_scores[cat_idx][o.uuid]
+#                     s_price_penalty = 0.02 * (o._price / max(1.0, cap))
+#                     new_score = score_so_far + (s_rank - s_price_penalty)
+#                     new_price = price_so_far + o._price
+#                     new_beam.append((partial + [o], new_score, new_price))
+#             # keep only top beam_width sequences
+#             beam = sorted(new_beam, key=lambda x: (x[1], -x[2] if x[2] <= total_budget else -1e12), reverse=True)[:beam_width]
+
+#         # pick best valid combo under budget
+#         best_combo, best_score, best_price = None, -1e9, 1e12
+#         for combo, score, total_price in beam:
+#             if total_price <= total_budget and score > best_score:
+#                 best_combo, best_score, best_price = combo, score, total_price
+
+#         # fallback: allow over-budget near-misses
+#         if best_combo is None:
+#             best_over, best_over_score, best_gap = None, -1e9, 1e12
+#             for combo, score, total_price in beam:
+#                 gap = total_price - total_budget
+#                 if gap >= 0 and (gap < best_gap or (gap == best_gap and score > best_over_score)):
+#                     best_gap, best_over_score, best_over = gap, score, combo
+#             if best_over:
+#                 combo = best_over
+#                 total_price = sum(o._price for o in combo)
+#                 for o in combo: used_ids.add(o.uuid)
+#                 out_items = [asdict(_serialize_item(o)) for o in combo]
+#                 near_misses.append({"items": out_items, "total_price": total_price, "missing_categories": missing_cats})
+#                 all_outfits.append({"items": out_items, "total_price": total_price, "missing_categories": missing_cats})
+#             continue
+
+#         # commit valid combo
+#         for o in best_combo: used_ids.add(o.uuid)
+#         out_items = [asdict(_serialize_item(o)) for o in best_combo]
+#         valid_outfits.append({"items": out_items, "total_price": best_price, "missing_categories": missing_cats})
+#         all_outfits.append({"items": out_items, "total_price": best_price, "missing_categories": missing_cats})
+
+#     return {"valid_outfits": valid_outfits, "near_misses": near_misses, "composed": all_outfits}
+
+def compose_outfits(p: OutfitParams) -> Dict[str, Any]:
     """
-    Compose outfits using beam search instead of full itertools.product to handle
-    multiple categories and per-category candidates efficiently.
+    Compose outfits by directly combining fetched items from each category.
+    No reranking, no beam search, no HuggingFace dependencies.
     """
+    # Determine categories based on number of articles
     cats = OUTFIT_ORDER_BY_N[5 if p.articles >= 5 else p.articles]
     plan = call_llm_plan_safe(
         event=p.text_query,
@@ -494,12 +603,6 @@ def compose_outfits(p: OutfitParams, beam_width: int = 10) -> Dict[str, Any]:
         budget=p.budget,
         num_outfits=p.num_outfits,
     ) or _lm_fallback_plan(p.num_outfits, cats, p.text_query, p.brand_contains)
-
-    img_bytes = _bytes_from_b64(p.image_b64)
-    image_vec = embed_image(img_bytes) if img_bytes and p.search_with in ("Image", "Text + Image") else None
-
-    rerank_fn = (lambda objs, q: fashionclip_rerank(objs, q, img_bytes)) if ALLOW_FCLIP_RERANK \
-                else (lambda objs, q: lightweight_rerank(objs, q, image_vec))
 
     used_ids = set()
     valid_outfits, near_misses, all_outfits = [], [], []
@@ -511,88 +614,44 @@ def compose_outfits(p: OutfitParams, beam_width: int = 10) -> Dict[str, Any]:
         caps = _compute_category_caps(cats_in_this, total_budget)
 
         candidates_map, missing_cats = {}, []
+
+        # Fetch candidates per category
         for cat in cats_in_this:
             f = _build_category_filters(cat, p.gender, p.budget, p.brand_contains, caps.get(cat))
             objs = do_hybrid_search(
                 text_query=(outfit_plan.get(cat) or f"{p.text_query} {cat} {p.brand_contains}".strip()),
-                text_vec=None, image_vec=None,
-                limit=max(6, p.per_cat_candidates * 2),
+                text_vec=None,
+                image_vec=None,
+                limit=p.num_outfits,  # fetch exactly the number of outfits
                 filters=f,
             )
-            reranked = rerank_fn(objs[:max(6, p.per_cat_candidates * 2)], outfit_plan.get(cat, ""))
-            # precompute price
-            for o in reranked:
-                try:
-                    o._price = _normalize_price((o.properties or {}).get("price", 0))
-                except Exception:
-                    o._price = 0.0
-            filtered = [o for o in reranked if o.uuid not in used_ids][:p.per_cat_candidates]
+            # Filter out already used items
+            filtered = [o for o in objs if o.uuid not in used_ids]
             if not filtered:
                 missing_cats.append(cat)
                 continue
-            candidates_map[cat] = filtered
+            candidates_map[cat] = filtered[:p.num_outfits]  # take top N candidates
 
         if not candidates_map:
             logger.debug(f"Skipping outfit {outfit_idx}, all categories empty")
             continue
 
-        cand_lists = list(candidates_map.values())
-        cats_in_this = list(candidates_map.keys())
+        # Generate outfits by simple positional combination
+        for i in range(p.num_outfits):
+            combo, total_price = [], 0.0
+            for cat in candidates_map.keys():
+                items = candidates_map[cat]
+                # wrap around if fewer candidates than outfits
+                o = items[i % len(items)]
+                combo.append(o)
+                total_price += _normalize_price((o.properties or {}).get("price", 0))
+                used_ids.add(o.uuid)
 
-        # precompute rank scores
-        rank_scores = []
-        for lst in cand_lists:
-            n = max(1, len(lst))
-            rank_scores.append({o.uuid: _score_rank_order(i, n) for i, o in enumerate(lst)})
-
-        # -------- BEAM SEARCH IMPLEMENTATION --------
-        beam = [([], 0.0, 0.0)]  # list of tuples: (partial_combo, score_so_far, price_so_far)
-
-        for cat_idx, lst in enumerate(cand_lists):
-            new_beam = []
-            for partial, score_so_far, price_so_far in beam:
-                for o in lst:
-                    if o.uuid in {x.uuid for x in partial}:
-                        continue  # skip duplicates
-                    cap = caps.get(cats_in_this[cat_idx]) or (total_budget / len(cats_in_this))
-                    s_rank = rank_scores[cat_idx][o.uuid]
-                    s_price_penalty = 0.02 * (o._price / max(1.0, cap))
-                    new_score = score_so_far + (s_rank - s_price_penalty)
-                    new_price = price_so_far + o._price
-                    new_beam.append((partial + [o], new_score, new_price))
-            # keep only top beam_width sequences
-            beam = sorted(new_beam, key=lambda x: (x[1], -x[2] if x[2] <= total_budget else -1e12), reverse=True)[:beam_width]
-
-        # pick best valid combo under budget
-        best_combo, best_score, best_price = None, -1e9, 1e12
-        for combo, score, total_price in beam:
-            if total_price <= total_budget and score > best_score:
-                best_combo, best_score, best_price = combo, score, total_price
-
-        # fallback: allow over-budget near-misses
-        if best_combo is None:
-            best_over, best_over_score, best_gap = None, -1e9, 1e12
-            for combo, score, total_price in beam:
-                gap = total_price - total_budget
-                if gap >= 0 and (gap < best_gap or (gap == best_gap and score > best_over_score)):
-                    best_gap, best_over_score, best_over = gap, score, combo
-            if best_over:
-                combo = best_over
-                total_price = sum(o._price for o in combo)
-                for o in combo: used_ids.add(o.uuid)
-                out_items = [asdict(_serialize_item(o)) for o in combo]
-                near_misses.append({"items": out_items, "total_price": total_price, "missing_categories": missing_cats})
-                all_outfits.append({"items": out_items, "total_price": total_price, "missing_categories": missing_cats})
-            continue
-
-        # commit valid combo
-        for o in best_combo: used_ids.add(o.uuid)
-        out_items = [asdict(_serialize_item(o)) for o in best_combo]
-        valid_outfits.append({"items": out_items, "total_price": best_price, "missing_categories": missing_cats})
-        all_outfits.append({"items": out_items, "total_price": best_price, "missing_categories": missing_cats})
+            out_items = [asdict(_serialize_item(o)) for o in combo]
+            valid_outfits.append({"items": out_items, "total_price": total_price, "missing_categories": missing_cats})
+            all_outfits.append({"items": out_items, "total_price": total_price, "missing_categories": missing_cats})
 
     return {"valid_outfits": valid_outfits, "near_misses": near_misses, "composed": all_outfits}
-
 
 
 
