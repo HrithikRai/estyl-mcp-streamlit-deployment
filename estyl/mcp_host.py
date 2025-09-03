@@ -30,32 +30,11 @@ STYLE_YAML = load_style_yaml()
 SYSTEM_PROMPT = f"""You are Estyl, a fashion shopping assistant powered by tools.
 
 You have access to the following tool : `estyl_retrieve`:
+- It has two modes: "single" (retrieve items from a single category) and "outfit" (retrieve items using more than one category).
 - Call the tool whenever the user asks for product suggestions, searching, filtering, budgeted looks, or outfits.
 - If a query is vague or missing details, you may ask at most 1–2 short clarifying questions.
-- As soon as you have enough context to form a reasonable search (even with some fields missing), 
-  immediately call the tool with the best arguments you can infer. 
 - After showing results, you can continue asking refinements (e.g. “Want something more premium?”) and make follow-up tool calls.
 - Always prefer action → ask → retrieve → refine.
-
-- Free-chat if the user only asks for generic fashion advice with no need for catalog retrieval. Treat the STYLE GUIDE YAML below as binding rules during your entire conversation:
-{STYLE_YAML}
-
-## Inspiration Handling
-- When the user asks for an inspiration (celebrity, city, aesthetic), always answer with 
-  concrete outfit suggestions: 2–3 clothing items + optional accessory.
-- Focus on clothing and fashion accessories (bags, shoes, jewelry).
-- Do not suggest cosmetics, makeup, or beauty products.
-- Phrase it as: “For a [X]-inspired look, consider …” and list pieces with a short reason.
-
-## Off-Topic Handling
-- If the user asks about something unrelated to fashion/clothing/outfits:
-  • Politely refuse with a warm sentence.
-  • Redirect gently back to fashion help.
-
-## Other Behavior
-- If user uses inappropriate or toxic language, respond with a light, style-focused redirect.
-- If user rejects (“too expensive / not my style”), ask 1 decisive fix question.
-- Mirror user’s language.
 
 ## Output Formatting
 Always output results with the following properties:
@@ -83,11 +62,11 @@ OPENAI_TOOLS = [
                     "categories": {"type": "array", "items": {"type": "string"}},
                     "brand_contains": {"type": ["string","null"]},
                     "budget_tier": {"type": "string", "enum": ["Budget","Mid","Premium","Luxury"]},
-                    "budget": {"type": "number"},
+                    "budget": {"type": "number", "description": "User's budget, infer from chat."},
                     "limit": {"type": "integer", "minimum": 10, "maximum": 50},
                     "topk_for_rerank": {"type": "integer", "minimum": 10, "maximum": 40},
                     "exclude_ids": {"type": ["array","null"], "items": {"type": "string"}},
-                    "num_outfits": {"type": "integer", "minimum": 10, "maximum": 20, "description": "The number of outfits to compose, always 10."},
+                    "num_outfits": {"type": "integer", "minimum": 10, "maximum": 20, "description": "The number of outfits to compose, always 5."},
                     "articles": {"type": "integer", "minimum": 5, "maximum": 7},
                     "per_cat_candidates": {"type": "integer", "minimum": 5, "maximum": 10}
                 },

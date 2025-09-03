@@ -15,7 +15,6 @@ import weaviate
 from weaviate.classes.init import Auth
 from weaviate.classes.query import Filter, MetadataQuery
 import heapq, math
-
 from .config import (
     WEAVIATE_URL, WEAVIATE_API_KEY, COLLECTION,
     QUERY_PROPS, RETURN_PROPS, BUDGET_TIERS, CATEGORY_OPTIONS,
@@ -33,7 +32,7 @@ logging.basicConfig(
 
 logger = logging.getLogger("core")
 
-ALLOW_FCLIP_RERANK = os.getenv("ALLOW_FCLIP_RERANK", "False").lower() in ("1", "true", "yes")
+ALLOW_FCLIP_RERANK = os.getenv("ALLOW_FCLIP_RERANK", "True").lower() in ("1", "true", "yes")
 
 
 # ------------------------
@@ -107,14 +106,15 @@ def get_clip():
 
 # Load FashionCLIP only if enabled
 if ALLOW_FCLIP_RERANK:
-    from transformers import CLIPTokenizer
+    
 
     @lru_cache(maxsize=1)
     def get_fashionclip():
         device = "cuda" if torch.cuda.is_available() else "cpu"
         m = CLIPModel.from_pretrained("patrickjohncyh/fashion-clip").to(device)
         p = CLIPProcessor.from_pretrained("patrickjohncyh/fashion-clip")
-        return m, p, device
+        tokenizer = CLIPTokenizer.from_pretrained("patrickjohncyh/fashion-clip")
+        return m, p, device, tokenizer
 else:
     get_fashionclip = None  
 
@@ -154,22 +154,21 @@ def embed_image(image_bytes: bytes) -> np.ndarray:
 def build_filters(
     gender: Optional[str],
     categories: Optional[List[str]],
-    price_min: Optional[float],
+    #price_min: Optional[float],
     price_max: Optional[float],
     brand_substr: Optional[str],
     exclude_ids: Optional[List[str]] = None,
 ) -> Optional[Filter]:
     parts = []
-    if gender and gender.lower() != "any":
-        parts.append(Filter.by_property("gender").equal(gender))
+    parts.append(Filter.by_property("gender").equal(gender))
     if categories:
         parts.append(Filter.any_of([Filter.by_property("category").equal(c) for c in categories]))
-    if price_min is not None:
-        parts.append(Filter.by_property("price").greater_or_equal(price_min))
+    # if price_min is not None:
+    #     parts.append(Filter.by_property("price").greater_or_equal(price_min))
     if price_max is not None:
         parts.append(Filter.by_property("price").less_or_equal(price_max))
-    if brand_substr:
-        parts.append(Filter.by_property("brand").like(f"*{brand_substr}*"))
+    # if brand_substr:
+    #     parts.append(Filter.by_property("brand").like(f"*{brand_substr}*"))
     if exclude_ids:
         try:
             parts.append(Filter.by_id().not_in(exclude_ids))
@@ -199,7 +198,7 @@ def lightweight_rerank(objs, query_text: str, query_img_vec: Optional[np.ndarray
     for o in objs:
         p = o.properties or {}
         b = 0.0
-        for key in ("category","color","brand"):
+        for key in ("title","description","image_caption"):
             val = str(p.get(key,"")).lower()
             if val and val in qt:
                 b += 0.02
@@ -211,11 +210,8 @@ def lightweight_rerank(objs, query_text: str, query_img_vec: Optional[np.ndarray
 if ALLOW_FCLIP_RERANK:
     def fashionclip_rerank(objs, query_text: str, query_img_bytes: Optional[bytes]):
         if not objs: return []
-        model, processor, device = get_fashionclip()
-        from transformers import CLIPTokenizer
+        model, processor, device, tokenizer = get_fashionclip()
         texts = [_compose_rerank_text(o.properties or {}) for o in objs]
-
-        tokenizer = CLIPTokenizer.from_pretrained("patrickjohncyh/fashion-clip")
         text_inputs = tokenizer(texts, padding=True, truncation=True, max_length=77, return_tensors="pt").to(device)
         with torch.no_grad():
             doc_embs = model.get_text_features(**text_inputs)
@@ -288,7 +284,7 @@ def do_hybrid_search(
     text_vec: Optional[np.ndarray],
     image_vec: Optional[np.ndarray],
     limit: int,
-    offset: int,
+    #offset: int,
     filters: Optional[Filter],
 ):
     client = get_client()
@@ -297,7 +293,7 @@ def do_hybrid_search(
         primary_vec = image_vec
         target_vector = "image_vector"
     else:
-        effective_alpha = 0.0
+        effective_alpha = 0.00
         primary_vec = text_vec
         target_vector = "text_vector"
     logger.debug("Running hybrid search with query=%s, limit=%s, filters=%s",
@@ -309,7 +305,7 @@ def do_hybrid_search(
         target_vector=target_vector,
         query_properties=QUERY_PROPS,
         limit=int(limit),
-        offset=int(offset),
+        #offset=int(offset),
         filters=filters,
         return_properties=RETURN_PROPS,
         return_metadata=MetadataQuery(score=True),
@@ -339,9 +335,9 @@ def retrieve_single_items(p: SingleSearchParams) -> Dict[str, Any]:
     image_vec = embed_image(img_bytes) if img_bytes and p.search_with in ("Image","Text + Image") else None
 
     filters = build_filters(
-        gender=None if p.gender == "any" else p.gender,
+        gender=p.gender,
         categories=cats,
-        price_min=price_min,
+        # price_min=price_min,
         price_max=price_max,
         brand_substr=p.brand_contains,
         exclude_ids=p.exclude_ids,
@@ -352,7 +348,7 @@ def retrieve_single_items(p: SingleSearchParams) -> Dict[str, Any]:
         text_vec=text_vec,
         image_vec=image_vec,
         limit=max(p.limit, p.topk_for_rerank),
-        offset=p.offset,
+        # offset=p.offset,
         filters=filters,
     )
 
