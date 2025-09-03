@@ -1,39 +1,39 @@
 from __future__ import annotations
-import io, json, time, itertools, base64
+import io, json,base64
 from dataclasses import dataclass, asdict
 from functools import lru_cache
 from typing import Optional, List, Dict, Tuple, Any
 import os
+
 from dotenv import load_dotenv
 load_dotenv()
+
 import numpy as np
 from PIL import Image
 import torch
 from transformers import CLIPModel, CLIPProcessor, CLIPTokenizer
-
 import weaviate
 from weaviate.classes.init import Auth
 from weaviate.classes.query import Filter, MetadataQuery
-import heapq, math
+# import heapq, math <- For Beam Search (commented out)
+
 from .config import (
     WEAVIATE_URL, WEAVIATE_API_KEY, COLLECTION,
     QUERY_PROPS, RETURN_PROPS, CATEGORY_OPTIONS,
     OUTFIT_WEIGHTS, OUTFIT_ORDER_BY_N, CAT_SYNONYMS,
 )
 
-import logging, sys
+import logging
 
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    filename='core.log', 
-    filemode='w'
+    handlers=[logging.StreamHandler()]
 )
 
 logger = logging.getLogger("core")
 
 ALLOW_FCLIP_RERANK = os.getenv("ALLOW_FCLIP_RERANK", "True").lower() in ("1", "true", "yes")
-
 
 # ------------------------
 # Dataclasses / Types

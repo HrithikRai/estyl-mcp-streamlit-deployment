@@ -1,12 +1,9 @@
-# server.py
 from __future__ import annotations
-
 import logging
 from typing import Any, Dict, List, Optional
-import sys
 from mcp.server.fastmcp import FastMCP
 from .core import retrieve, SingleSearchParams, OutfitParams
-from .config import CATEGORY_OPTIONS, CAT_SYNONYMS
+from .config import CAT_SYNONYMS
 import re
 import difflib
 from typing import Optional, List
@@ -39,7 +36,7 @@ CATEGORIES = {
     "Swimwear",
 }
 
-# Map synonyms / user words → canonical categories
+# canonical categories
 CAT_SYNONYMS = {
     "shirt": "Tops",
     "tshirt": "Tops",
@@ -79,27 +76,22 @@ CAT_SYNONYMS = {
 def _norm_key(s: str) -> str:
     if not s:
         return ""
-    # lowercase, remove punctuation (keep spaces & alphanum), collapse whitespace
     s = s.lower()
-    s = re.sub(r"[^\w\s]", " ", s)  # replace punctuation with space
+    s = re.sub(r"[^\w\s]", " ", s) 
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
 def _build_syn_map():
     syn = {}
-    # include user-provided CAT_SYNONYMS (normalized) with plural/singular variants
     for k, v in CAT_SYNONYMS.items():
         nk = _norm_key(k)
         syn[nk] = v
-        # plural / singular heuristics
         if nk.endswith("s"):
             syn.setdefault(nk[:-1], v)
         else:
             syn.setdefault(nk + "s", v)
-        # join-without-space variant (common in user tokens)
         syn.setdefault(nk.replace(" ", ""), v)
 
-    # include canonical categories themselves (normalized) -> canonical
     for canon in CATEGORIES:
         nk = _norm_key(canon)
         syn.setdefault(nk, canon)
@@ -116,7 +108,7 @@ def normalize_categories(
     categories: Optional[List[str]] = None,
 ) -> List[str]:
     """
-    Improved category resolver:
+    Category resolver:
     - Respects explicit categories first (preserving their order)
     - Adds any categories inferred from the free-text query (n-gram matching)
     - If nothing found, returns a sensible default outfit list
@@ -130,36 +122,29 @@ def normalize_categories(
             seen.add(canon)
             found.append(canon)
 
-    # Helper: resolve a token/phrase -> canonical category (or None)
     def resolve_token_phrase(phrase: str) -> Optional[str]:
         nk = _norm_key(phrase)
         if not nk:
             return None
-        # direct lookup
         if nk in _SYN_MAP:
             return _SYN_MAP[nk]
-        # token / sub-phrase attempts: split and check ngrams inside phrase
         toks = nk.split()
-        # check longest n-grams first
         for L in range(min(4, len(toks)), 0, -1):
             for i in range(len(toks) - L + 1):
                 gram = " ".join(toks[i : i + L])
                 if gram in _SYN_MAP:
                     return _SYN_MAP[gram]
-        # fuzzy fallback against known normalized keys
         close = difflib.get_close_matches(nk, _SYN_KEYS, n=1, cutoff=0.85)
         if close:
             return _SYN_MAP[close[0]]
         return None
 
-    # 1) explicit categories (preserve order)
     if categories:
         for c in categories:
             resolved = resolve_token_phrase(c)
             if resolved:
                 add_cat(resolved)
 
-    # 3) if nothing found, return a sensible default set in deterministic order
     if not found:
         return ["Tops", "Bottoms", "Shoes", "Outerwear", "Accessories"]
 
