@@ -7,6 +7,9 @@ import sys
 from mcp.server.fastmcp import FastMCP
 from .core import retrieve, SingleSearchParams, OutfitParams
 from .config import CATEGORY_OPTIONS, BUDGET_TIERS, CAT_SYNONYMS
+import re
+import difflib
+from typing import Optional, List
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -73,61 +76,94 @@ CAT_SYNONYMS = {
     "wallet": "Small Leather Goods",
 }
 
-# def normalize_categories(user_query: str) -> List[str]:
-#     """Extract categories from user query using CAT_SYNONYMS."""
-#     q = user_query.lower()
-#     found = set()
-#     for word, cat in CAT_SYNONYMS.items():
-#         if word in q:
-#             found.add(cat)
-#     return list(found & CATEGORIES)
+def _norm_key(s: str) -> str:
+    if not s:
+        return ""
+    # lowercase, remove punctuation (keep spaces & alphanum), collapse whitespace
+    s = s.lower()
+    s = re.sub(r"[^\w\s]", " ", s)  # replace punctuation with space
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def _build_syn_map():
+    syn = {}
+    # include user-provided CAT_SYNONYMS (normalized) with plural/singular variants
+    for k, v in CAT_SYNONYMS.items():
+        nk = _norm_key(k)
+        syn[nk] = v
+        # plural / singular heuristics
+        if nk.endswith("s"):
+            syn.setdefault(nk[:-1], v)
+        else:
+            syn.setdefault(nk + "s", v)
+        # join-without-space variant (common in user tokens)
+        syn.setdefault(nk.replace(" ", ""), v)
+
+    # include canonical categories themselves (normalized) -> canonical
+    for canon in CATEGORIES:
+        nk = _norm_key(canon)
+        syn.setdefault(nk, canon)
+        syn.setdefault(nk.replace(" ", ""), canon)
+        # variants for ampersands and "and"
+        syn.setdefault(nk.replace("&", "and"), canon)
+        syn.setdefault(nk.replace("&", ""), canon)
+    return syn
+
+_SYN_MAP = _build_syn_map()
+_SYN_KEYS = list(_SYN_MAP.keys())
 
 def normalize_categories(
     categories: Optional[List[str]] = None,
-    user_query: Optional[str] = None
 ) -> List[str]:
     """
-    Normalize categories from explicit list or free-text query.
-    - Always respects bot-supplied categories if present.
-    - Adds query-derived categories as extra hints.
-    - Fallback is the standard outfit categories.
+    Improved category resolver:
+    - Respects explicit categories first (preserving their order)
+    - Adds any categories inferred from the free-text query (n-gram matching)
+    - If nothing found, returns a sensible default outfit list
     """
-    found = set()
+    found = []
+    seen = set()
 
-    def resolve_token(token: str) -> Optional[str]:
-        t = token.lower().strip()
-        # Synonym match
-        if t in CAT_SYNONYMS:
-            return CAT_SYNONYMS[t]
-        # Exact canonical match
-        for canon in CATEGORIES:
-            if t == canon.lower():
-                return canon
-        # Controlled substring
-        for canon in CATEGORIES:
-            if len(t) > 3 and (t in canon.lower() or canon.lower() in t):
-                return canon
+    def add_cat(canon: str):
+        if not canon: return
+        if canon not in seen:
+            seen.add(canon)
+            found.append(canon)
+
+    # Helper: resolve a token/phrase -> canonical category (or None)
+    def resolve_token_phrase(phrase: str) -> Optional[str]:
+        nk = _norm_key(phrase)
+        if not nk:
+            return None
+        # direct lookup
+        if nk in _SYN_MAP:
+            return _SYN_MAP[nk]
+        # token / sub-phrase attempts: split and check ngrams inside phrase
+        toks = nk.split()
+        # check longest n-grams first
+        for L in range(min(4, len(toks)), 0, -1):
+            for i in range(len(toks) - L + 1):
+                gram = " ".join(toks[i : i + L])
+                if gram in _SYN_MAP:
+                    return _SYN_MAP[gram]
+        # fuzzy fallback against known normalized keys
+        close = difflib.get_close_matches(nk, _SYN_KEYS, n=1, cutoff=0.85)
+        if close:
+            return _SYN_MAP[close[0]]
         return None
 
-    # 1. Start with categories explicitly passed by bot
+    # 1) explicit categories (preserve order)
     if categories:
         for c in categories:
-            resolved = resolve_token(c)
+            resolved = resolve_token_phrase(c)
             if resolved:
-                found.add(resolved)
+                add_cat(resolved)
 
-    # 2. Add any categories inferred from text query
-    if user_query:
-        for token in user_query.lower().split():
-            resolved = resolve_token(token)
-            if resolved:
-                found.add(resolved)
-
-    # 3. Fallback → use standard outfit categories
+    # 3) if nothing found, return a sensible default set in deterministic order
     if not found:
         return ["Tops", "Bottoms", "Shoes", "Outerwear", "Accessories"]
 
-    return list(found)
+    return found
 
 
 @mcp.tool(title="Retrieve fashion items or compose outfits", name="estyl_retrieve")
@@ -172,10 +208,7 @@ def estyl_retrieve(
     try:
         # Normalize categories
         logger.debug(">>> estyl_retrieve called with args: %s", locals())
-        resolved_cats = normalize_categories(text_query)
-        if categories:
-            # filter user-passed categories too
-            resolved_cats.extend([c for c in categories if c in CATEGORIES])
+        resolved_cats = normalize_categories(categories)
         resolved_cats = list(set(resolved_cats))
 
         logger.debug("Resolved categories: %s", resolved_cats)
