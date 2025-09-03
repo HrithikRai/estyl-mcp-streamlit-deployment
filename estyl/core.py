@@ -173,12 +173,11 @@ def build_filters(
             pass
     return Filter.all_of(parts) if parts else None
 
-def _compose_rerank_text(p: Dict) -> str:
-    return " | ".join([
-        str(p.get("title","")),
-        str(p.get("description",""),
-        str(p.get("image_caption","")),
-        )[:400],
+def _compose_rerank_text(p: Dict[str, Any]) -> str:
+    return " ".join([
+        str(p.get("title", "")),
+        str(p.get("description", "")),
+        str(p.get("image_caption", "")),
     ])
 
 def lightweight_rerank(objs, query_text: str, query_img_vec: Optional[np.ndarray]):
@@ -338,9 +337,9 @@ def retrieve_single_items(p: SingleSearchParams) -> Dict[str, Any]:
 
     final = reranked[:p.limit]
     return {
-        "count": len(final),
-        "items": [asdict(_serialize_item(o)) for o in final],
-    }
+            "count": len(final),
+            "items": [asdict(_serialize_item(o)) for o in final],
+        }
 
 # ------------------------
 # Public API: Outfit composer
