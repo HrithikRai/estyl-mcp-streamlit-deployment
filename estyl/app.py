@@ -47,7 +47,7 @@ MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 HISTORY_FILE = os.getenv("HISTORY_FILE", "chat_history.txt")
 MAX_EXCHANGES_IN_WINDOW = int(os.getenv("MAX_EXCHANGES_IN_WINDOW", "2"))
 FIRST_PASS_MAX_TOKENS = int(os.getenv("FIRST_PASS_MAX_TOKENS", "64"))
-SECOND_PASS_SUMMARIZE = os.getenv("SECOND_PASS_SUMMARIZE", "True").lower() in ("1","true","yes")
+SECOND_PASS_SUMMARIZE = os.getenv("SECOND_PASS_SUMMARIZE", "False").lower() in ("1","true","yes")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("estyl_streamlit")
@@ -418,78 +418,139 @@ def render_collage(products: List[Dict[str, Any]]):
                 st.markdown(f"[Open product]({p.get('product_url')})")
 
 
+import streamlit as st
+import json
+from typing import List, Dict, Any
+
+# Assume you have these helpers already in your codebase
+
 def main():
     st.set_page_config(page_title="Estyl — MCP Streamlit", layout="wide")
-    st.title("Estyl — Fashion assistant (Streamlit)")
-    st.write("Interact with the MCP-powered Estyl assistant. Upload up to 3 images to include in your query.")
+    st.title("👗 Estyl — Fashion Assistant")
 
-    # left: chat & uploader, right: product / results pane
-    left, right = st.columns([1, 2])
-    with left:
-        user_text = st.text_area("Your message", key="user_text", height=120)
-        uploaded = st.file_uploader("Upload up to 3 images (optional)", accept_multiple_files=True, type=["png", "jpg", "jpeg"], key="uploader")
-        images_meta = []
-        if uploaded:
-            images_meta = prepare_image_uploads(uploaded)
-            cols = st.columns(len(images_meta))
-            for i, im in enumerate(images_meta):
-                with cols[i]:
-                    st.image(im.get("preview"), caption=f"Image {i+1}")
-        submit = st.button("Send")
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
 
-    with right:
-        st.header("Assistant response")
-        response_box = st.empty()
-        st.header("Products / Results")
-        products_box = st.empty()
+    if "products" not in st.session_state:
+        st.session_state.products = []
 
     worker = get_worker()
 
-    if submit and user_text.strip():
-        # show spinner while waiting for background processing — worker.submit blocks but runs in worker thread
-        with st.spinner("Getting results from Estyl..."):
+    # -------------------
+    # Chat UI
+    # -------------------
+    for role, msg in st.session_state.chat_history:
+        with st.chat_message(role):
+            st.markdown(msg)
+
+            # Inline product thumbnails under assistant messages
+            if role == "assistant":
+                products = st.session_state.get("products", [])
+                if products:
+                    for p in products:
+                        if "image_url" in p:
+                            st.markdown(
+                                f"""
+                                <a href="{p.get("product_url", p["image_url"])}" target="_blank">
+                                    <img src="{p["image_url"]}" 
+                                         style="width:120px; height:120px; object-fit:cover; 
+                                                border-radius:8px; margin:4px;">
+                                </a>
+                                """,
+                                unsafe_allow_html=True
+                            )
+                            if "title" in p:
+                                st.caption(p["title"])
+
+    # -------------------
+    # File uploader (optional images)
+    # -------------------
+    uploaded = st.file_uploader(
+        "Upload up to 3 images (optional)",
+        accept_multiple_files=True,
+        type=["png", "jpg", "jpeg"],
+        key="uploader"
+    )
+    images_meta = []
+    if uploaded:
+        images_meta = prepare_image_uploads(uploaded)
+        with st.chat_message("user"):
+            for i, im in enumerate(images_meta):
+                st.image(im.get("preview"), caption=f"Image {i+1}", width=120)  # small thumbnail
+
+    # -------------------
+    # User input
+    # -------------------
+    if prompt := st.chat_input("Ask Estyl something..."):
+        st.session_state.chat_history.append(("user", prompt))
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.spinner("Thinking..."):
             try:
-                # Submit to background worker
-                result = worker.submit(user_text.strip(), images_meta)
+                result = worker.submit(prompt, images_meta)
             except Exception as e:
                 result = f"(error submitting request: {e})"
-        response_box.markdown(result)
 
-        # Attempt to parse products out of the response if LLM returned a JSON-like bullets list
-        products = []
-        # Heuristic: try JSON decode first, else try to extract lines with 'title'/'price' style
-        try:
-            parsed = json.loads(result)
-            if isinstance(parsed, list):
-                products = parsed
-        except Exception:
-            # fallback: scan for lines like: title: ... price: ... image_url: ...
-            cur = {}
-            for line in result.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                if ":" in line:
-                    k, v = line.split(":", 1)
-                    k = k.strip().lower()
-                    v = v.strip()
-                    if k in ("title", "name"):
-                        cur.setdefault("title", v)
-                    elif k == "price":
-                        try:
-                            cur.setdefault("price", float("".join([c for c in v if (c.isdigit() or c in ".,")]).replace(",","")))
-                        except Exception:
-                            cur.setdefault("price", v)
-                    elif k in ("product_url", "url"):
-                        cur.setdefault("product_url", v)
-                    elif k in ("image_url", "image"):
-                        cur.setdefault("image_url", v)
-                # detect separators
-                if len(cur) >= 2:
-                    products.append(cur)
-                    cur = {}
-        # render collage
-        render_collage(products)
+        st.session_state.products = parse_products(result)
+
+        st.session_state.chat_history.append(("assistant", result))
+        with st.chat_message("assistant"):
+            st.markdown(result)
+            for p in st.session_state.products:
+                if "image_url" in p:
+                    st.markdown(
+                        f"""
+                        <a href="{p.get("product_url", p["image_url"])}" target="_blank">
+                            <img src="{p["image_url"]}" 
+                                 style="width:120px; height:120px; object-fit:cover; 
+                                        border-radius:8px; margin:4px;">
+                        </a>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                    if "title" in p:
+                        st.caption(p["title"])
+
+
+# -------------------
+# Helpers
+# -------------------
+def parse_products(result: str) -> List[Dict[str, Any]]:
+    """Heuristic parsing of LLM output into product dicts"""
+    products = []
+    try:
+        parsed = json.loads(result)
+        if isinstance(parsed, list):
+            products = parsed
+    except Exception:
+        cur = {}
+        for line in result.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if ":" in line:
+                k, v = line.split(":", 1)
+                k = k.strip().lower()
+                v = v.strip()
+                if k in ("title", "name"):
+                    cur.setdefault("title", v)
+                elif k == "price":
+                    try:
+                        cur.setdefault(
+                            "price",
+                            float("".join([c for c in v if (c.isdigit() or c in ".,")]).replace(",", ""))
+                        )
+                    except Exception:
+                        cur.setdefault("price", v)
+                elif k in ("product_url", "url"):
+                    cur.setdefault("product_url", v)
+                elif k in ("image_url", "image"):
+                    cur.setdefault("image_url", v)
+            if len(cur) >= 2:
+                products.append(cur)
+                cur = {}
+    return products
 
 
 if __name__ == "__main__":
