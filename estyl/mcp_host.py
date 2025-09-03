@@ -1,6 +1,6 @@
 from __future__ import annotations
 import asyncio, json, os, sys
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -61,8 +61,7 @@ OPENAI_TOOLS = [
                     "gender": {"type": "string", "enum": ["male","female","unisex"]},
                     "categories": {"type": "array", "items": {"type": "string"}},
                     "brand_contains": {"type": ["string","null"]},
-                    "budget_tier": {"type": "string", "enum": ["Budget","Mid","Premium","Luxury"]},
-                    "budget": {"type": "number", "description": "User's budget, infer from chat."},
+                    "budget": {"type": "number", "description": "User's budget, infer from chat.","default": 350},
                     "limit": {"type": "integer", "minimum": 10, "maximum": 50},
                     "topk_for_rerank": {"type": "integer", "minimum": 10, "maximum": 40},
                     "exclude_ids": {"type": ["array","null"], "items": {"type": "string"}},

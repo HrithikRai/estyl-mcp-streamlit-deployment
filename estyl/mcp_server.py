@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 import sys
 from mcp.server.fastmcp import FastMCP
 from .core import retrieve, SingleSearchParams, OutfitParams
-from .config import CATEGORY_OPTIONS, BUDGET_TIERS, CAT_SYNONYMS
+from .config import CATEGORY_OPTIONS, CAT_SYNONYMS
 import re
 import difflib
 from typing import Optional, List
@@ -177,32 +177,30 @@ def estyl_retrieve(
     search_with: str = "Text",  # "Text" | "Image" | "Text + Image"
     image_b64: Optional[str] = None,
     brand_contains: Optional[str] = None,
-    budget_tier: str = "Mid",  # Budget buckets (approx): Budget <100, Mid 100-300, Premium 300-600, Luxury >600
-    budget: Optional[float] = None,  # Explicit budget in euros/dollars overrides budget_tier
+    budget: Optional[float] = None,  # Explicit budget in euros/dollars mentioned by user
     # Single-item controls
     limit: int = 10,
-    topk_for_rerank: int = 10,
-    offset: int = 0,
+    topk_for_rerank: int = 5,
+    # offset: int = 0,
     exclude_ids: Optional[List[str]] = None,
     # Outfit controls
     num_outfits: Optional[int] = 5,
-    articles: Optional[int] = 5,  # 2..5
-    per_cat_candidates: Optional[int] = 5,
+    articles: Optional[int] = 3,  # 2..5
+    per_cat_candidates: Optional[int] = 3,
 ) -> Dict[str, Any]:
     """
     mode: "single" or "outfit"
     text_query: Global theme - Short description of the event or style (e.g. "wedding", "beach vacation").
     gender: {"male","female","unisex"}.
     budget: Numeric budget cap. Example: "under 250 euros" -> budget=250.
-    budget_tier: Only used if user does not specify numeric budget.
     categories: Will be auto-normalized to allowed taxonomy.
 
     SINGLE mode relevant args:
-      - text_query, search_with, image_b64, gender, brand_contains, budget_tier, budget
+      - text_query, search_with, image_b64, gender, brand_contains, budget
       - categories, limit, topk_for_rerank, offset, exclude_ids
 
     OUTFIT mode relevant args:
-      - text_query, search_with, image_b64, gender, brand_contains, budget_tier, budget
+      - text_query, search_with, image_b64, gender, brand_contains, budget
       - num_outfits, articles (2..5), per_cat_candidates
     """
     try:
@@ -223,11 +221,9 @@ def estyl_retrieve(
                 gender=gender,
                 categories=resolved_cats,
                 brand_contains=brand_contains,
-                budget_tier=budget_tier,
                 budget=budget if budget is not None else 350.0,
                 limit=limit,
                 topk_for_rerank=topk_for_rerank,
-                offset=offset,
                 exclude_ids=exclude_ids,
             )
             logger.debug("Estyl Single params: %s", s)
@@ -240,11 +236,10 @@ def estyl_retrieve(
                 image_b64=image_b64,
                 gender=gender,
                 brand_contains=brand_contains,
-                budget_tier=budget_tier,
                 budget=budget if budget is not None else 350.0,
-                num_outfits=num_outfits or 3,
+                num_outfits=num_outfits or 5,
                 articles=articles or 3,
-                per_cat_candidates=per_cat_candidates or 5,
+                per_cat_candidates=per_cat_candidates or 2,
             )
             logger.debug("Estyl Outfit params: %s", o)
             return retrieve("outfit", outfit=o)
@@ -255,17 +250,6 @@ def estyl_retrieve(
     except Exception as e:
         logger.exception("Retrieve failed")
         return {"error": str(e)}
-
-
-@mcp.tool(title="Get supported options", name="estyl_options")
-def estyl_options() -> Dict[str, Any]:
-    """
-    Introspection for UI/host: categories and available budget tiers per category.
-    """
-    return {
-        "categories": CATEGORY_OPTIONS,
-        "budget_tiers": {k: list(v.keys()) for k, v in BUDGET_TIERS.items()},
-    }
 
 
 def main():
