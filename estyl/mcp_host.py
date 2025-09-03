@@ -1,9 +1,8 @@
 from __future__ import annotations
-import asyncio, json, os, sys, re
-from typing import Dict, Any, List, Optional, Tuple
-import datetime
-import atexit
-from dataclasses import dataclass, field
+import asyncio, json, os, sys
+from typing import Dict, Any, List, Tuple
+from collections import deque
+from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -11,33 +10,20 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 from openai import AsyncOpenAI
-from mcp import ClientSession, StdioServerParameters, types
+from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 # --------------------------- Config ---------------------------------
-MODEL = "gpt-4o-mini"
+MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+HISTORY_FILE = os.getenv("HISTORY_FILE", "chat_history.txt")
 
-# Hard cap on turns kept in the "LLM window" (user+assistant skeleton turns).
-MAX_WINDOW_TURNS = 4  # tiny and constant
-
-# Secondary safety cap by characters to avoid rare overflows
-MAX_WINDOW_CHARS = 6000
-
-HISTORY_FILE = "chat_history.txt"
+# The model will only see these many past exchanges (user->assistant pairs).
+MAX_EXCHANGES_IN_WINDOW = 2
 # --------------------------------------------------------------------
 
 client = AsyncOpenAI()
 
-def load_style_yaml(path: str = "estyl/style_guide.yaml") -> str:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        logging.warning("style_guide.yaml not found; continuing without it.")
-        return ""
-
-STYLE_YAML = load_style_yaml()
-
+# ------------------------- System Prompt ----------------------------
 SYSTEM_PROMPT = f"""You are Estyl, a fashion shopping assistant powered by tools.
 
 You have access to the following tool : `estyl_retrieve`:
@@ -59,7 +45,9 @@ Always output results with the following properties:
 - image_url (string)
 - Do not include extra commentary, markdown, or descriptions. Just bullets of items.
 """
+# --------------------------------------------------------------------
 
+# ------------------------- Tool Schemas -----------------------------
 OPENAI_TOOLS = [
     {
         "type": "function",
@@ -89,198 +77,42 @@ OPENAI_TOOLS = [
         }
     }
 ]
+# --------------------------------------------------------------------
 
-# ---------------------- Utilities & Managers ------------------------
+# ------------------------- Minimal History --------------------------
+# We keep ONLY the last two (user, assistant) exchanges in-memory for the LLM.
+# Full raw log (including tool outputs) is appended to HISTORY_FILE as JSONL.
 
-def content_text(msg) -> str:
+def now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+def append_log(entry: Dict[str, Any]) -> None:
+    # Append as JSONL for easy auditing/replay.
+    try:
+        with open(HISTORY_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logging.error(f"Failed to write history: {e}")
+
+# Each element is a (user_text, assistant_text) tuple.
+last_exchanges: deque[Tuple[str, str]] = deque(maxlen=MAX_EXCHANGES_IN_WINDOW)
+
+def build_messages(user_msg: str, assistant_preview: str | None) -> List[Dict[str, Any]]:
     """
-    OpenAI SDK may return message.content as a string or a list of content parts.
-    Normalize to plain text.
+    Build the messages window: [system] + last_exchanges + current user.
+    Assistant previews are short summaries of prior assistant turns.
     """
-    c = getattr(msg, "content", None)
-    if isinstance(c, str):
-        return c
-    if isinstance(c, list):
-        out = []
-        for part in c:
-            if isinstance(part, dict):
-                t = part.get("text")
-                if t:
-                    out.append(t)
-    return "\n".join(out) if out else ""
+    msgs: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for u, a in list(last_exchanges):
+        msgs.append({"role": "user", "content": u})
+        msgs.append({"role": "assistant", "content": a})
+    msgs.append({"role": "user", "content": user_msg})
+    return msgs
 
-def _trim(s: str, max_chars: int) -> str:
-    if len(s) <= max_chars:
-        return s
-    return s[:max_chars] + f"... [truncated {len(s)-max_chars} chars]"
-
-def _msg_len_chars(m: Dict[str, Any]) -> int:
-    c = m.get("content") or ""
-    if isinstance(c, str):
-        return len(c)
-    if isinstance(c, list):
-        return sum(len(part.get("text","")) for part in c if isinstance(part, dict))
-    return 0
-
-@dataclass
-class ToolRecord:
-    result_id: str
-    tool_call_id: str
-    name: str
-    args: Dict[str, Any]
-    output: str
-    ts: str
-    label: str = ""
-
-class ToolStore:
-    """
-    In-memory cache of tool outputs available for reuse, without polluting the LLM context.
-    """
-    def __init__(self) -> None:
-        self._records: Dict[str, ToolRecord] = {}
-        self._by_call: Dict[str, str] = {}
-        self._counter: int = 0
-
-    def store(self, tool_call_id: str, name: str, args: Dict[str, Any], output: str) -> ToolRecord:
-        self._counter += 1
-        rid = f"R{self._counter}"
-        label = self._make_label(name, args, output)
-        rec = ToolRecord(
-            result_id=rid,
-            tool_call_id=tool_call_id,
-            name=name,
-            args=args,
-            output=output,
-            ts=datetime.datetime.now().isoformat(timespec="seconds"),
-            label=label,
-        )
-        self._records[rid] = rec
-        self._by_call[tool_call_id] = rid
-        return rec
-
-    def _make_label(self, name: str, args: Dict[str, Any], output: str) -> str:
-        # Short human label e.g. "single | sneakers | 10 items"
-        mode = args.get("mode", "")
-        text_query = (args.get("text_query") or "").strip()
-        cats = args.get("categories") or []
-        # Heuristic: count lines that look like bullets to guess item count
-        lines = [ln for ln in output.splitlines() if ln.strip()]
-        item_like = sum(1 for ln in lines if re.match(r"^[\-\*\d]+\s", ln) or ("product_url" in ln and "title" in ln))
-        cat_part = ",".join(cats[:3])
-        if len(cats) > 3:
-            cat_part += f"+{len(cats)-3}"
-        q_part = (text_query[:30] + "…") if len(text_query) > 30 else text_query
-        return f"{mode or name} | {cat_part or q_part or 'request'} | ~{item_like} items"
-
-    def list(self) -> List[ToolRecord]:
-        # Newest first
-        return sorted(self._records.values(), key=lambda r: r.ts, reverse=True)
-
-    def get(self, result_id: str) -> Optional[ToolRecord]:
-        return self._records.get(result_id)
-
-    def get_by_call(self, tool_call_id: str) -> Optional[ToolRecord]:
-        rid = self._by_call.get(tool_call_id)
-        return self.get(rid) if rid else None
-
-class ContextWindow:
-    """
-    Maintains a tiny, constant-size message window for the LLM, while logging
-    everything in full_history for auditing/export.
-    """
-    def __init__(self, system_prompt: str):
-        self.system_msg = {"role": "system", "content": system_prompt}
-        self.window_history: List[Dict[str, Any]] = [self.system_msg.copy()]
-        self.full_history: List[Dict[str, Any]] = [self.system_msg.copy()]
-
-    def _cap_by_turns(self) -> None:
-        sys_msgs = [m for m in self.window_history if m.get("role") == "system"]
-        others = [m for m in self.window_history if m.get("role") != "system"]
-        keep = others[-(MAX_WINDOW_TURNS * 2):]
-        self.window_history = sys_msgs[:1] + keep
-
-    def _cap_by_chars(self) -> None:
-        # Enforce an overall char budget for safety.
-        base = [m for m in self.window_history if m.get("role") == "system"]
-        others = [m for m in self.window_history if m.get("role") != "system"]
-        total = sum(_msg_len_chars(m) for m in base)
-        kept: List[Dict[str, Any]] = []
-        for m in reversed(others):
-            if total + _msg_len_chars(m) <= MAX_WINDOW_CHARS:
-                kept.append(m)
-                total += _msg_len_chars(m)
-            else:
-                break
-        self.window_history = base + list(reversed(kept))
-
-    # ---------------- public API ----------------
-
-    def add_user(self, text: str) -> None:
-        msg = {"role": "user", "content": text}
-        self.window_history.append(msg)
-        self.full_history.append(msg)
-        self._cap_by_turns()
-        self._cap_by_chars()
-
-    def add_assistant_window(self, text: str) -> None:
-        """
-        Add a SHORT assistant breadcrumb to the LLM window (not the full response).
-        """
-        msg = {"role": "assistant", "content": text}
-        self.window_history.append(msg)
-        self._cap_by_turns()
-        self._cap_by_chars()
-
-    def add_assistant_full(self, text: str) -> None:
-        """
-        Log the FULL assistant text to full history (for saving/audit) but do NOT
-        add it to the LLM window (prevents token bloat).
-        """
-        msg = {"role": "assistant", "content": text}
-        self.full_history.append(msg)
-
-    def add_tool_msg_full(self, tool_call_id: str, name: str, args: Dict[str, Any], output: str) -> None:
-        """
-        Log the tool call and the tool output ONLY to full_history.
-        """
-        tool_call_msg = {
-            "role": "assistant",
-            "tool_calls": [{
-                "id": tool_call_id,
-                "type": "function",
-                "function": {"name": name, "arguments": json.dumps(args)}
-            }]
-        }
-        tool_content_msg = {
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "name": name,
-            "content": output,
-        }
-        self.full_history.append(tool_call_msg)
-        self.full_history.append(tool_content_msg)
-
-    def get_window(self) -> List[Dict[str, Any]]:
-        # The messages we actually send to the LLM.
-        return self.window_history
-
-    def flush_to_file(self, path: str) -> None:
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                for msg in self.full_history:
-                    role = msg.get("role")
-                    if role == "tool":
-                        # Keep full tool outputs in logs
-                        content = msg.get("content") or ""
-                    else:
-                        content = content_text(msg)
-                    f.write(f"{role}: {content}\n")
-            print(f"\nFull chat history saved to {path}")
-        except Exception as e:
-            print(f"Failed to save chat history: {e}")
-
-# ---------------------------- Chat Loop -----------------------------
-
+# --------------------------------------------------------------------
+# --- config toggles for latency ---
+SECOND_PASS_SUMMARIZE = True   # set True only if you want LLM to rewrite tool output
+FIRST_PASS_MAX_TOKENS = 64      # keep the planner cheap+snappy
 async def run_chat():
     params = StdioServerParameters(
         command=sys.executable,
@@ -293,119 +125,172 @@ async def run_chat():
             await session.initialize()
             await session.list_tools()
 
-            ctx = ContextWindow(SYSTEM_PROMPT)
-            tools = ToolStore()
-
-            print("Estyl chat ready. Type your message. Ctrl+C or /exit to quit.")
-            def save_history_to_file():
-                ctx.flush_to_file(HISTORY_FILE)
-
-            atexit.register(save_history_to_file)
-
+            print("Estyl ready. Type your message. /exit to quit.")
             while True:
                 try:
                     user = input("you> ").strip()
                 except (EOFError, KeyboardInterrupt):
                     print("\n👋 Bye!")
-                    save_history_to_file()
                     return
+
                 if not user:
                     continue
                 if user.lower() in {"/exit", "/quit"}:
                     print("👋 Bye!")
-                    save_history_to_file()
                     return
 
-                # ---------- local convenience commands (do not hit LLM) ----------
-                if user.lower() == "/results":
-                    records = tools.list()
-                    if not records:
-                        print("estyl> No cached results yet.\n")
-                        continue
-                    print("estyl> Cached results (newest first):")
-                    for r in records:
-                        print(f"  {r.result_id}  {r.ts}  {r.label}")
-                    print()
-                    continue
+                # Log user turn immediately
+                append_log({"ts": now_iso(), "role": "user", "content": user})
 
-                m = re.match(r"^/show\s+(R\d+)$", user, flags=re.I)
-                if m:
-                    rid = m.group(1)
-                    rec = tools.get(rid)
-                    if not rec:
-                        print(f"estyl> No result found for {rid}\n")
-                        continue
-                    print(f"estyl> [result {rid}]")
-                    print(rec.output + "\n")
-                    # Do not push this into the LLM context (console-only)
-                    continue
-                # ------------------------------------------------------------------
+                # Build minimal window (only last two exchanges)
+                msgs = build_messages(user, None)
 
-                # Append user message
-                ctx.add_user(user)
-
-                # Send minimal window to LLM
+                # Fast LLM call — no extra params, tool_choice auto
                 resp = await client.chat.completions.create(
                     model=MODEL,
-                    messages=ctx.get_window(),
+                    messages=msgs,
                     tools=OPENAI_TOOLS,
+                    temperature=0.2,
+                    max_tokens=FIRST_PASS_MAX_TOKENS,
                 )
                 msg = resp.choices[0].message
-
-                # Handle tool call (we only handle the first call, same as before)
-                if getattr(msg, "tool_calls", None):
-                    tc = msg.tool_calls[0]
-                    if tc.function.name == "estyl_retrieve":
+                if getattr(msg, "tool_calls", None) and msg.tool_calls:
+    # Run all tool calls in parallel
+                    async def run_one(tc):
+                        name = tc.function.name
                         args = json.loads(tc.function.arguments or "{}")
-                        tool_result = await session.call_tool("estyl_retrieve", args)
-                        tool_output = tool_result.content[0].text if tool_result.content else "{}"
+                        call_id = tc.id  # <-- needed to link tool result back
+                        try:
+                            tool_result = await session.call_tool(name, args)
+                            out_text = tool_result.content[0].text if tool_result.content else ""
+                        except Exception as e:
+                            out_text = f"(tool {name} failed: {e})"
+                        return {"name": name, "args": args, "out": out_text, "call_id": call_id}
 
-                        # Cache tool result WITHOUT polluting the LLM window
-                        rec = tools.store(tc.id, "estyl_retrieve", args, tool_output)
+                    results = await asyncio.gather(*[run_one(tc) for tc in msg.tool_calls])
 
-                        # Log full details to full_history only
-                        ctx.add_tool_msg_full(tc.id, "estyl_retrieve", args, tool_output)
+                    # ======= A) Zero second pass: print tool output directly =======
+                    if not SECOND_PASS_SUMMARIZE:
+                        combined = "\n".join(r["out"].strip() for r in results if r["out"])
+                        combined = combined or "(no results)"
+                        print(f"estyl> {combined}\n")
 
-                        # Show the real results to the user (console)
-                        # print(f"estyl> {tool_output}\n")
-                        # extracted = []
-                        # for item in json.loads(tool_output).get("items", []):
-                        #     props = item.get("properties", {})
-                        #     extracted.append({
-                        #         "uuid": item.get("uuid"),
-                        #         "title": props.get("title"),
-                        #         "brand": props.get("brand"),
-                        #         "price": props.get("price"),
-                        #         "image_url": props.get("gcs_image_path"),
-                        #         "product_url": props.get("product_url"),
-                        #     })
-                        print(f"estyl > {tool_output}")
+                        append_log({"ts": now_iso(), "role": "assistant", "content": combined})
+                        last_exchanges.append((user, combined[:400]))
+                        continue  # done with this turn
 
-                        # Add a SHORT breadcrumb to the LLM window for future turns
-                        # (This keeps the model aware something happened, without tokens.)
-                        breadcrumb = f"(estyl_retrieve completed; stored as result_id={rec.result_id}, {rec.label})"
-                        ctx.add_assistant_window(breadcrumb)
+                    # ======= B) Correct second pass with tool_call_id linking =======
+                    followup_msgs = msgs.copy()
 
-                        # Also log the full assistant "final answer" ONLY in full_history
-                        ctx.add_assistant_full(tool_output)
+                    # include the assistant message that contained tool_calls
+                    followup_msgs.append({
+                        "role": "assistant",
+                        "content": msg.content or "",
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments or "{}",
+                                },
+                            } for tc in (msg.tool_calls or [])
+                        ],
+                    })
 
-                    else:
-                        print("estyl> (unrecognized tool request)\n")
-                        ctx.add_assistant_window("(unrecognized tool request)")
-                        ctx.add_assistant_full("(unrecognized tool request)")
+                    # append one tool message per result with tool_call_id
+                    for r in results:
+                        followup_msgs.append({
+                            "role": "tool",
+                            "tool_call_id": r["call_id"],  # <-- REQUIRED
+                            "name": r["name"],
+                            "content": r["out"],
+                        })
+
+                    follow_resp = await client.chat.completions.create(
+                        model=MODEL,
+                        messages=followup_msgs,
+                        temperature=0.2,
+                    )
+                    answer = (follow_resp.choices[0].message.content or "").strip() or "(no response)"
+                    print(f"estyl> {answer}\n")
+
+                    append_log({"ts": now_iso(), "role": "assistant", "content": answer})
+                    last_exchanges.append((user, answer[:400]))
 
                 else:
-                    # Normal assistant response (keep window tiny; log full)
-                    answer = content_text(msg) or ""
+                    # ✅ Plain text response from LLM (no tools used)
+                    answer = (msg.content or "").strip() or "(no response from model)"
                     print(f"estyl> {answer}\n")
-                    # Window gets a tiny breadcrumb only
-                    brief = _trim(answer, 500)
-                    ctx.add_assistant_window(brief)
-                    # Full history gets the whole thing
-                    ctx.add_assistant_full(answer)
+                    append_log({"ts": now_iso(), "role": "assistant", "content": answer})
+                    last_exchanges.append((user, answer[:400]))
 
+                # If there are tool calls, execute them ASAP and print results
+                # if getattr(msg, "tool_calls", None):
+                #     # Run all tool calls in parallel for speed, then print in order
+                #     async def run_one(tc):
+                #         name = tc.function.name
+                #         args = json.loads(tc.function.arguments or "{}")
+                #         result_text = ""
+                #         try:
+                #             tool_result = await session.call_tool(name, args)
+                #             result_text = tool_result.content[0].text if tool_result.content else ""
+                #         except Exception as e:
+                #             result_text = f"(tool {name} failed: {e})"
+                #         return {
+                #             "tool_name": name,
+                #             "arguments": args,
+                #             "output": result_text,
+                #         }
+
+                #     tasks = [run_one(tc) for tc in msg.tool_calls]
+                #     results = await asyncio.gather(*tasks, return_exceptions=False)
+
+                #     # Print each tool’s output to the console immediately
+                #     # (Assumes tools already format the list as required bullets)
+                #     combined_preview_parts: List[str] = []
+                #     for r in results:
+                #         out = (r.get("output") or "").strip()
+                #         if out:
+                #             print(f"estyl> {out}\n")
+                #         else:
+                #             print(f"estyl> (no results)\n")
+
+                #         # Log full tool interaction (with full output) to file
+                #         append_log({
+                #             "ts": now_iso(),
+                #             "role": "assistant",
+                #             "type": "tool_result",
+                #             "tool": r.get("tool_name"),
+                #             "arguments": r.get("arguments"),
+                #             "output": r.get("output"),
+                #         })
+
+                #         # Keep assistant preview extremely short in memory
+                #         combined_preview_parts.append(f"(used {r.get('tool_name')})")
+
+                #     # Update minimal memory with a single compact assistant preview
+                #     preview = " ".join(combined_preview_parts) if combined_preview_parts else "(tool used)"
+                #     last_exchanges.append((user, preview))
+
+                #     # Also log a compact assistant note after tools
+                #     append_log({"ts": now_iso(), "role": "assistant", "content": preview})
+
+                # else:
+                #     # Plain assistant text (no tool)
+                #     answer = (msg.content or "").strip() if hasattr(msg, "content") else ""
+                #     print(f"estyl> {answer}\n")
+
+                #     # Log full assistant text to file
+                #     append_log({"ts": now_iso(), "role": "assistant", "content": answer})
+
+                #     # Save a trimmed preview into minimal memory
+                #     preview = answer if len(answer) <= 400 else answer[:400] + "…"
+                #     last_exchanges.append((user, preview))
+
+# ----------------------------- Main ---------------------------------
 if __name__ == "__main__":
     try:
         asyncio.run(run_chat())
     except KeyboardInterrupt:
-        print("\n Bye!")
+        print("\nBye!")
