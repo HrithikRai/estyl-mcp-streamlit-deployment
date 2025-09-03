@@ -3,7 +3,9 @@ import io, json, time, itertools, base64
 from dataclasses import dataclass, asdict
 from functools import lru_cache
 from typing import Optional, List, Dict, Tuple, Any
-
+import os
+from dotenv import load_dotenv
+load_dotenv()
 import numpy as np
 from PIL import Image
 import torch
@@ -12,6 +14,7 @@ from transformers import CLIPModel, CLIPProcessor, CLIPTokenizer
 import weaviate
 from weaviate.classes.init import Auth
 from weaviate.classes.query import Filter, MetadataQuery
+import heapq, math
 
 from .config import (
     WEAVIATE_URL, WEAVIATE_API_KEY, COLLECTION,
@@ -29,6 +32,9 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("core")
+
+ALLOW_FCLIP_RERANK = os.getenv("ALLOW_FCLIP_RERANK", "False").lower() in ("1", "true", "yes")
+
 
 # ------------------------
 # Dataclasses / Types
@@ -99,12 +105,18 @@ def get_clip():
     p = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
     return m, p, device
 
-@lru_cache(maxsize=1)
-def get_fashionclip():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    m = CLIPModel.from_pretrained("patrickjohncyh/fashion-clip").to(device)
-    p = CLIPProcessor.from_pretrained("patrickjohncyh/fashion-clip")
-    return m, p, device
+# Load FashionCLIP only if enabled
+if ALLOW_FCLIP_RERANK:
+    from transformers import CLIPTokenizer
+
+    @lru_cache(maxsize=1)
+    def get_fashionclip():
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        m = CLIPModel.from_pretrained("patrickjohncyh/fashion-clip").to(device)
+        p = CLIPProcessor.from_pretrained("patrickjohncyh/fashion-clip")
+        return m, p, device
+else:
+    get_fashionclip = None  
 
 # ------------------------
 # Embeddings
@@ -196,42 +208,47 @@ def lightweight_rerank(objs, query_text: str, query_img_vec: Optional[np.ndarray
     order = np.argsort(-scores)
     return [objs[i] for i in order]
 
-def fashionclip_rerank(objs, query_text: str, query_img_bytes: Optional[bytes]):
-    if not objs: return []
-    model, processor, device = get_fashionclip()
-    texts = [_compose_rerank_text(o.properties or {}) for o in objs]
+if ALLOW_FCLIP_RERANK:
+    def fashionclip_rerank(objs, query_text: str, query_img_bytes: Optional[bytes]):
+        if not objs: return []
+        model, processor, device = get_fashionclip()
+        from transformers import CLIPTokenizer
+        texts = [_compose_rerank_text(o.properties or {}) for o in objs]
 
-    tokenizer = CLIPTokenizer.from_pretrained("patrickjohncyh/fashion-clip")
-    text_inputs = tokenizer(texts, padding=True, truncation=True, max_length=77, return_tensors="pt").to(device)
-    with torch.no_grad():
-        doc_embs = model.get_text_features(**text_inputs)
-    doc_embs = doc_embs / (doc_embs.norm(dim=1, keepdim=True) + 1e-9)
+        tokenizer = CLIPTokenizer.from_pretrained("patrickjohncyh/fashion-clip")
+        text_inputs = tokenizer(texts, padding=True, truncation=True, max_length=77, return_tensors="pt").to(device)
+        with torch.no_grad():
+            doc_embs = model.get_text_features(**text_inputs)
+        doc_embs = doc_embs / (doc_embs.norm(dim=1, keepdim=True) + 1e-9)
 
-    if query_img_bytes is not None:
-        try:
-            query_img = Image.open(io.BytesIO(query_img_bytes)).convert("RGB")
-            img_inputs = processor(images=query_img, return_tensors="pt").to(device)
-            with torch.no_grad():
-                q_emb = model.get_image_features(**img_inputs)
-        except Exception:
+        if query_img_bytes is not None:
+            try:
+                query_img = Image.open(io.BytesIO(query_img_bytes)).convert("RGB")
+                img_inputs = processor(images=query_img, return_tensors="pt").to(device)
+                with torch.no_grad():
+                    q_emb = model.get_image_features(**img_inputs)
+            except Exception:
+                q_inputs = processor(text=[query_text or ""], return_tensors="pt", padding=True, truncation=True).to(device)
+                with torch.no_grad():
+                    q_emb = model.get_text_features(**q_inputs)
+        else:
             q_inputs = processor(text=[query_text or ""], return_tensors="pt", padding=True, truncation=True).to(device)
             with torch.no_grad():
                 q_emb = model.get_text_features(**q_inputs)
-    else:
-        q_inputs = processor(text=[query_text or ""], return_tensors="pt", padding=True, truncation=True).to(device)
-        with torch.no_grad():
-            q_emb = model.get_text_features(**q_inputs)
 
-    q_emb = q_emb / (q_emb.norm(dim=1, keepdim=True) + 1e-9)
-    sims = (q_emb @ doc_embs.T).squeeze(0).cpu().numpy()
-    order = np.argsort(-sims)
-    # attach score if possible
-    for o, s in zip(objs, sims):
-        try:
-            if o.metadata: setattr(o.metadata, "fclip_score", float(s))
-        except Exception:
-            pass
-    return [objs[i] for i in order]
+        q_emb = q_emb / (q_emb.norm(dim=1, keepdim=True) + 1e-9)
+        sims = (q_emb @ doc_embs.T).squeeze(0).cpu().numpy()
+        order = np.argsort(-sims)
+        for o, s in zip(objs, sims):
+            try:
+                if o.metadata: setattr(o.metadata, "fclip_score", float(s))
+            except Exception:
+                pass
+        return [objs[i] for i in order]
+else:
+    def fashionclip_rerank(objs, query_text: str, query_img_bytes: Optional[bytes]):
+        # Fallback silently to lightweight rerank
+        return lightweight_rerank(objs, query_text, None)
 
 def _serialize_item(obj) -> Item:
     props = obj.properties or {}
@@ -339,11 +356,13 @@ def retrieve_single_items(p: SingleSearchParams) -> Dict[str, Any]:
         filters=filters,
     )
 
-    # Rerank (prefer FashionCLIP for fashion domain)
-    if img_bytes:
-        reranked = fashionclip_rerank(objs[:p.topk_for_rerank], p.text_query, img_bytes)
+    if ALLOW_FCLIP_RERANK:
+        if img_bytes:
+            reranked = fashionclip_rerank(objs[:p.topk_for_rerank], p.text_query, img_bytes)
+        else:
+            reranked = fashionclip_rerank(objs[:p.topk_for_rerank], p.text_query, None)
     else:
-        reranked = fashionclip_rerank(objs[:p.topk_for_rerank], p.text_query, None)
+        reranked = lightweight_rerank(objs[:p.topk_for_rerank], p.text_query, image_vec)
 
     final = reranked[:p.limit]
     return {
@@ -474,6 +493,7 @@ def compose_outfits(p: OutfitParams) -> Dict[str, Any]:
         ) or _lm_fallback_plan(p.num_outfits, cats, p.text_query, p.brand_contains)
 
     img_bytes = _bytes_from_b64(p.image_b64)
+    image_vec = embed_image(img_bytes) if img_bytes and p.search_with in ("Image","Text + Image") else None
     used_ids = set()
     valid_outfits, near_misses, all_outfits = [], [], []
 
@@ -495,15 +515,18 @@ def compose_outfits(p: OutfitParams) -> Dict[str, Any]:
                 offset=0,
                 filters=f,
             )
-            if img_bytes:
-                reranked = fashionclip_rerank(objs[:max(8, p.per_cat_candidates*2)], outfit_plan.get(cat, ""), img_bytes)
+            if ALLOW_FCLIP_RERANK:
+                if img_bytes:
+                    reranked = fashionclip_rerank(objs[:max(8, p.per_cat_candidates*2)], outfit_plan.get(cat, ""), img_bytes)
+                else:
+                    reranked = fashionclip_rerank(objs[:max(8, p.per_cat_candidates*2)], outfit_plan.get(cat, ""), None)
             else:
                 reranked = lightweight_rerank(objs[:max(8, p.per_cat_candidates*2)], outfit_plan.get(cat, ""), None)
 
             filtered = [o for o in reranked if o.uuid not in used_ids][:p.per_cat_candidates]
 
             if not filtered:
-                logger.debug(f"⚠️ No candidates found for category {cat}, skipping.")
+                logger.debug(f"No candidates found for category {cat}, skipping.")
                 missing_cats.append(cat)
                 continue
 
@@ -511,7 +534,7 @@ def compose_outfits(p: OutfitParams) -> Dict[str, Any]:
 
         # If absolutely nothing found → skip outfit entirely
         if not candidates_map:
-            logger.debug(f"❌ Skipping outfit {outfit_idx}, all categories empty")
+            logger.debug(f"Skipping outfit {outfit_idx}, all categories empty")
             continue
 
         cand_lists = [candidates_map[c] for c in candidates_map.keys()]
