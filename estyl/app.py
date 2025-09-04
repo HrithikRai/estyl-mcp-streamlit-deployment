@@ -48,7 +48,7 @@ HISTORY_FILE = os.getenv("HISTORY_FILE", "chat_history.txt")
 MAX_EXCHANGES_IN_WINDOW = int(os.getenv("MAX_EXCHANGES_IN_WINDOW", "2"))
 FIRST_PASS_MAX_TOKENS = int(os.getenv("FIRST_PASS_MAX_TOKENS", "64"))
 SECOND_PASS_SUMMARIZE = os.getenv("SECOND_PASS_SUMMARIZE", "False").lower() in ("1","true","yes")
-
+OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("estyl_streamlit")
 
