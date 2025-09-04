@@ -63,20 +63,16 @@ Rules about images:
 - When calling the tool `estyl_retrieve`, if you want the tool to use an image, include an "images" array in the function arguments. Each image entry should include an "id" matching the provided ids. Optionally include "image_b64" directly if you want to pass the image inline. If you only include the id, the runtime will attach the corresponding base64 for you.
 
 Tool usage rules:
+- When calling estyl_retrieve, you must always include mode, text_query, gender, and categories.
+- mode: "single" if user asks for items, "outfit" if asking for styled looks or more than one items.
+- text_query: paraphrase the user’s request.
+- categories: depends on mode, single-item categories or multiple for outfits.
+- gender: infer from pronouns or context, default to "unisex" if unclear.
 - Do not call the tool `estyl_retrieve` unless you have a clear intent to retrieve items or compose outfits.
 - Always get the user's preferences (style, vibe, budget) from text or images or both before calling the tool.
-- When calling estyl_retrieve, you must always include a non-empty `categories` list.
-- Infer categories from user query (style, vibe, budget).
-- Modes: "single" (10 items) or "outfit" (5 outfits).
 - If missing details, ask at most 1–2 short clarifying questions.
 - Always prefer action → ask → retrieve → refine.
 
-## Output Formatting
-Always output results with the following properties:
-- title (string)
-- price (float)
-- product_url (string)
-- image_url (string)
 - Do not include extra commentary, markdown, or descriptions. Just bullets of items.
 """
 # Tool schema (kept simple for the Streamlit frontend — the backend mcp server still enforces semantics)
@@ -110,12 +106,12 @@ OPENAI_TOOLS = [
                     "categories": {"type": "array", "items": {"type": "string"}},
                     "brand_contains": {"type": ["string","null"]},
                     "budget": {"type": "number", "description": "User's budget, infer from chat.","default": 350},
-                    "limit": {"type": "integer", "minimum": 10, "maximum": 50},
-                    "topk_for_rerank": {"type": "integer", "minimum": 10, "maximum": 40},
+                    "limit": {"type": "integer", "enum": [15]},
+                    "topk_for_rerank": {"type": "integer", "enum": [10]},
                     "exclude_ids": {"type": ["array","null"], "items": {"type": "string"}},
-                    "num_outfits": {"type": "integer", "minimum": 10, "maximum": 20, "description": "The number of outfits to compose, always 5."},
-                    "articles": {"type": "integer", "minimum": 5, "maximum": 7},
-                    "per_cat_candidates": {"type": "integer", "minimum": 5, "maximum": 10}
+                    "num_outfits": {"type": "integer", "enum": [10]},
+                    "articles": {"type": "integer", "enum": [3,4,5]},
+                    "per_cat_candidates": {"type": "integer", "enum": [5]},
                 },
                 "required": ["mode", "text_query", "gender", "categories"],
             }
@@ -490,7 +486,7 @@ def main():
             st.session_state.products = parse_products(result)
 
         # Save chat history
-        st.session_state.chat_history.append(("assistant", prompt))
+        st.session_state.chat_history.append(("assistant", result))
         with st.chat_message("assistant"):
             if outfits:
                 render_outfits(outfits)
