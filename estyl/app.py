@@ -62,7 +62,9 @@ Rules about images:
 - Use images with purpose "search" as query images for image-vector search (i.e., treat them as the image to match in the catalog).
 - When calling the tool `estyl_retrieve`, if you want the tool to use an image, include an "images" array in the function arguments. Each image entry should include an "id" matching the provided ids. Optionally include "image_b64" directly if you want to pass the image inline. If you only include the id, the runtime will attach the corresponding base64 for you.
 
-Tool usage rules (same as before):
+Tool usage rules:
+- Do not call the tool `estyl_retrieve` unless you have a clear intent to retrieve items or compose outfits.
+- Always get the user's preferences (style, vibe, budget) from text or images or both before calling the tool.
 - When calling estyl_retrieve, you must always include a non-empty `categories` list.
 - Infer categories from user query (style, vibe, budget).
 - Modes: "single" (10 items) or "outfit" (5 outfits).
@@ -252,7 +254,7 @@ class MCPWorker:
 
             async def run_one(tc):
                 name = tc.function.name
-                args = json.loads(tc.function.arguments or "{}")
+                args = safe_json_loads(tc.function.arguments or "{}")
                 call_id = tc.id
                 # Inject image base64 when requested
                 try:
@@ -443,24 +445,10 @@ def main():
         with st.chat_message(role):
             st.markdown(msg)
 
-            # Inline product thumbnails under assistant messages
             if role == "assistant":
                 products = st.session_state.get("products", [])
                 if products:
-                    for p in products:
-                        if "image_url" in p:
-                            st.markdown(
-                                f"""
-                                <a href="{p.get("product_url", p["image_url"])}" target="_blank">
-                                    <img src="{p["image_url"]}" 
-                                         style="width:120px; height:120px; object-fit:cover; 
-                                                border-radius:8px; margin:4px;">
-                                </a>
-                                """,
-                                unsafe_allow_html=True
-                            )
-                            if "title" in p:
-                                st.caption(p["title"])
+                    render_products(products)
 
     # -------------------
     # File uploader (optional images)
@@ -476,7 +464,7 @@ def main():
         images_meta = prepare_image_uploads(uploaded)
         with st.chat_message("user"):
             for i, im in enumerate(images_meta):
-                st.image(im.get("preview"), caption=f"Image {i+1}", width=120)  # small thumbnail
+                st.image(im.get("preview"), caption=f"Image {i+1}", width=120)
 
     # -------------------
     # User input
@@ -492,38 +480,121 @@ def main():
             except Exception as e:
                 result = f"(error submitting request: {e})"
 
-        st.session_state.products = parse_products(result)
+        # Try parsing outfits first
+        outfits = parse_outfits(result)
+        if outfits:
+            st.session_state.products = []  # reset product list
+            st.session_state.outfits = outfits
+        else:
+            st.session_state.outfits = []
+            st.session_state.products = parse_products(result)
 
-        st.session_state.chat_history.append(("assistant", result))
+        # Save chat history
+        st.session_state.chat_history.append(("assistant", prompt))
         with st.chat_message("assistant"):
-            st.markdown(result)
-            for p in st.session_state.products:
-                if "image_url" in p:
-                    st.markdown(
-                        f"""
-                        <a href="{p.get("product_url", p["image_url"])}" target="_blank">
-                            <img src="{p["image_url"]}" 
-                                 style="width:120px; height:120px; object-fit:cover; 
-                                        border-radius:8px; margin:4px;">
-                        </a>
-                        """,
-                        unsafe_allow_html=True
-                    )
-                    if "title" in p:
-                        st.caption(p["title"])
-
+            if outfits:
+                render_outfits(outfits)
+            elif st.session_state.products:
+                render_products(st.session_state.products)
+            else:
+                st.markdown(result)
 
 # -------------------
 # Helpers
 # -------------------
+import json, re
+def safe_json_loads(s: str):
+    if not s:
+        return {}
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        # Fallback: try fixing common issues
+        fixed = s.strip()
+
+        # Replace single quotes → double
+        fixed = fixed.replace("'", '"')
+
+        # Remove trailing commas
+        fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
+
+        try:
+            return json.loads(fixed)
+        except Exception:
+            # As last resort: return empty dict
+            return {}
+        
+def parse_outfits(result: str) -> List[Dict[str, Any]]:
+    """Parse outfit-style responses (valid_outfits)."""
+    outfits = []
+    try:
+        parsed = json.loads(result)
+        if isinstance(parsed, dict) and "valid_outfits" in parsed:
+            for outfit in parsed["valid_outfits"]:
+                items = []
+                for item in outfit.get("items", []):
+                    props = item.get("properties", {})
+                    items.append({
+                        "title": props.get("title"),
+                        "price": props.get("price"),
+                        "product_url": props.get("product_url"),
+                        "image_url": props.get("gcs_image_path"),
+                        "brand": props.get("brand"),
+                        "description": props.get("description"),
+                        "category": props.get("category"),
+                    })
+                outfits.append({
+                    "items": items,
+                    "total_price": outfit.get("total_price"),
+                })
+    except Exception:
+        pass
+    return outfits
+
+def render_outfits(outfits: List[Dict[str, Any]]):
+    """Render multiple outfits with their items in cards."""
+    for idx, outfit in enumerate(outfits, start=1):
+        with st.container():
+            st.markdown(f"### 👕 Outfit {idx} — Total: ${outfit.get('total_price', 'N/A')}")
+            cols = st.columns(3)
+            for i, item in enumerate(outfit["items"]):
+                with cols[i % 3]:
+                    if item.get("image_url"):
+                        st.markdown(
+                            f"""
+                            <a href="{item.get("product_url", item['image_url'])}" target="_blank">
+                                <img src="{item['image_url']}" 
+                                     style="width:100%; height:200px; object-fit:cover; 
+                                            border-radius:12px; margin-bottom:8px;">
+                            </a>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                    st.markdown(f"**{item.get('title','Untitled')}**")
+                    if item.get("brand"):
+                        st.caption(f"👔 {item['brand']}")
+                    if item.get("price"):
+                        st.caption(f"💲 {item['price']}")
+            st.divider()
+
 def parse_products(result: str) -> List[Dict[str, Any]]:
-    """Heuristic parsing of LLM output into product dicts"""
+    """Parse LLM or MCP output into structured product dicts."""
     products = []
     try:
         parsed = json.loads(result)
-        if isinstance(parsed, list):
+        if isinstance(parsed, dict) and "items" in parsed:
+            for item in parsed["items"]:
+                props = item.get("properties", {})
+                products.append({
+                    "title": props.get("title"),
+                    "price": props.get("price"),
+                    "product_url": props.get("product_url"),
+                    "image_url": props.get("gcs_image_path")
+                })
+        elif isinstance(parsed, list):
             products = parsed
     except Exception:
+        # Fallback: heuristic line parsing
         cur = {}
         for line in result.splitlines():
             line = line.strip()
@@ -551,6 +622,29 @@ def parse_products(result: str) -> List[Dict[str, Any]]:
                 products.append(cur)
                 cur = {}
     return products
+
+
+def render_products(products: List[Dict[str, Any]]):
+    """Render products in a neat 3-column grid."""
+    cols = st.columns(3)
+    for i, p in enumerate(products):
+        with cols[i % 3]:
+            if p.get("image_url"):
+                st.markdown(
+                    f"""
+                    <a href="{p.get("product_url", p['image_url'])}" target="_blank">
+                        <img src="{p['image_url']}" 
+                             style="width:100%; height:200px; object-fit:cover; 
+                                    border-radius:12px; margin-bottom:8px;">
+                    </a>
+                    """,
+                    unsafe_allow_html=True
+                )
+            st.markdown(f"**{p.get('title','Untitled')}**")
+            if p.get("price"):
+                st.caption(f"💲 {p['price']}")
+            if p.get("product_url"):
+                st.markdown(f"[View Product]({p['product_url']})")
 
 
 if __name__ == "__main__":

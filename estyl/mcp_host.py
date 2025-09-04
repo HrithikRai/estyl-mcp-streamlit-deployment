@@ -40,7 +40,7 @@ Rules about images:
 - Use images with purpose "search" as query images for image-vector search (i.e., treat them as the image to match in the catalog).
 - When calling the tool `estyl_retrieve`, if you want the tool to use an image, include an "images" array in the function arguments. Each image entry should include an "id" matching the provided ids. Optionally include "image_b64" directly if you want to pass the image inline. If you only include the id, the runtime will attach the corresponding base64 for you.
 
-Tool usage rules (same as before):
+Tool usage rules:
 - When calling estyl_retrieve, you must always include a non-empty `categories` list.
 - Infer categories from user query (style, vibe, budget).
 - Modes: "single" (10 items) or "outfit" (5 outfits).
